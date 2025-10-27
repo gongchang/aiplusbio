@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calendar Test</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .calendar-container {
+            border: 1px solid #ddd;
+            padding: 20px;
+            margin: 20px;
+            min-height: 400px;
+        }
+        .calendar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #f8f9fa;
+        }
+        .calendar-nav {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .calendar-nav-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 5px;
+        }
+        .calendar-weekday {
+            text-align: center;
+            font-weight: bold;
+            padding: 10px;
+            background: #e9ecef;
+        }
+        .calendar-day {
+            border: 1px solid #ddd;
+            padding: 10px;
+            min-height: 80px;
+            position: relative;
+        }
+        .calendar-day.other-month {
+            background: #f8f9fa;
+            color: #6c757d;
+        }
+        .calendar-day.today {
+            background: #e3f2fd;
+            border-color: #2196f3;
+        }
+        .calendar-event {
+            background: #28a745;
+            color: white;
+            padding: 2px 4px;
+            margin: 1px 0;
+            border-radius: 2px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .calendar-week-view {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 5px;
+        }
+        .calendar-week-day {
+            border: 1px solid #ddd;
+            padding: 10px;
+            min-height: 120px;
+        }
+        .calendar-week-day-header {
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 10px;
+            padding: 5px;
+            background: #f8f9fa;
+        }
+        .test-buttons {
+            margin: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+        .test-buttons button {
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Calendar Test Page</h1>
+        
+        <div class="test-buttons">
+            <h3>Test Controls:</h3>
+            <button class="btn btn-primary" onclick="testMonthView()">Force Month View</button>
+            <button class="btn btn-success" onclick="testWeekView()">Force Week View</button>
+            <button class="btn btn-info" onclick="testNavigation()">Test Navigation</button>
+            <button class="btn btn-warning" onclick="checkCalendarState()">Check State</button>
+        </div>
+        
+        <div id="calendarContainer" class="calendar-container">
+            <p>Calendar will be rendered here...</p>
+        </div>
+        
+        <div id="debugOutput" style="margin: 20px; padding: 20px; background: #f1f1f1; font-family: monospace;">
+            <h4>Debug Output:</h4>
+            <div id="debugContent"></div>
+        </div>
+    </div>
+
+    <script>
+        // Mock calendar data
+        const mockEvents = [
+            {
+                id: 1,
+                title: "Test Event 1",
+                date: "2025-01-15",
+                categories: ["computer science"],
+                is_virtual: true
+            },
+            {
+                id: 2,
+                title: "Test Event 2",
+                date: "2025-01-20",
+                categories: ["biology"],
+                is_virtual: false
+            }
+        ];
+
+        // Calendar state
+        let calendarView = 'month';
+        let currentDate = new Date();
+
+        function log(message) {
+            const debugContent = document.getElementById('debugContent');
+            const timestamp = new Date().toLocaleTimeString();
+            debugContent.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+            console.log(message);
+        }
+
+        function renderMonthView() {
+            log('Rendering month view...');
+            const calendarContainer = document.getElementById('calendarContainer');
+            
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+            const monthName = currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            
+            const firstDay = new Date(year, month, 1);
+            const lastDay = new Date(year, month + 1, 0);
+            const startDate = new Date(firstDay);
+            startDate.setDate(startDate.getDate() - firstDay.getDay());
+            
+            const calendarHTML = `
+                <div class="calendar-header">
+                    <div class="calendar-nav">
+                        <button class="calendar-nav-btn" data-action="previous">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <span class="calendar-title">${monthName}</span>
+                        <button class="calendar-nav-btn" data-action="next">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="calendar-grid">
+                    <div class="calendar-weekdays">
+                        <div class="calendar-weekday">Sun</div>
+                        <div class="calendar-weekday">Mon</div>
+                        <div class="calendar-weekday">Tue</div>
+                        <div class="calendar-weekday">Wed</div>
+                        <div class="calendar-weekday">Thu</div>
+                        <div class="calendar-weekday">Fri</div>
+                        <div class="calendar-weekday">Sat</div>
+                    </div>
+                    <div class="calendar-days">
+                        ${generateMonthDays(startDate, lastDay)}
+                    </div>
+                </div>
+            `;
+            
+            calendarContainer.innerHTML = calendarHTML;
+            log('Month view rendered successfully');
+        }
+
+        function renderWeekView() {
+            log('Rendering week view...');
+            const calendarContainer = document.getElementById('calendarContainer');
+            
+            const weekStart = getWeekStart(currentDate);
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekEnd.getDate() + 6);
+            
+            const weekRange = `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+            
+            const calendarHTML = `
+                <div class="calendar-header">
+                    <div class="calendar-nav">
+                        <button class="calendar-nav-btn" data-action="previous">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <span class="calendar-title">${weekRange}</span>
+                        <button class="calendar-nav-btn" data-action="next">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="calendar-week-view">
+                    ${generateWeekDays(weekStart)}
+                </div>
+            `;
+            
+            calendarContainer.innerHTML = calendarHTML;
+            log('Week view rendered successfully');
+        }
+
+        function generateMonthDays(startDate, lastDay) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            let daysHTML = '';
+            let currentDate = new Date(startDate);
+            
+            for (let i = 0; i < 42; i++) {
+                const isCurrentMonth = currentDate.getMonth() === this.currentDate.getMonth();
+                const isToday = currentDate.getTime() === today.getTime();
+                const dayEvents = getEventsForDate(currentDate);
+                
+                let dayClass = 'calendar-day';
+                if (!isCurrentMonth) dayClass += ' other-month';
+                if (isToday) dayClass += ' today';
+                
+                const eventsHTML = dayEvents.map(event => `
+                    <div class="calendar-event" title="${event.title}">
+                        ${event.title.substring(0, 15)}${event.title.length > 15 ? '...' : ''}
+                    </div>
+                `).join('');
+                
+                daysHTML += `
+                    <div class="${dayClass}">
+                        <div style="font-weight: bold; margin-bottom: 5px;">${currentDate.getDate()}</div>
+                        ${eventsHTML}
+                    </div>
+                `;
+                
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+            
+            return daysHTML;
+        }
+
+        function generateWeekDays(weekStart) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            let daysHTML = '';
+            let currentDate = new Date(weekStart);
+            
+            for (let i = 0; i < 7; i++) {
+                const isToday = currentDate.getTime() === today.getTime();
+                const dayEvents = getEventsForDate(currentDate);
+                
+                let dayClass = 'calendar-week-day';
+                if (isToday) dayClass += ' today';
+                
+                const dayName = currentDate.toLocaleDateString('en-US', { weekday: 'short' });
+                const dayNumber = currentDate.getDate();
+                
+                const eventsHTML = dayEvents.map(event => `
+                    <div class="calendar-event" title="${event.title}">
+                        ${event.title.substring(0, 20)}${event.title.length > 20 ? '...' : ''}
+                    </div>
+                `).join('');
+                
+                daysHTML += `
+                    <div class="${dayClass}">
+                        <div class="calendar-week-day-header">
+                            ${dayName}<br>${dayNumber}
+                        </div>
+                        <div class="calendar-events">${eventsHTML}</div>
+                    </div>
+                `;
+                
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+            
+            return daysHTML;
+        }
+
+        function getEventsForDate(date) {
+            const dateStr = date.toISOString().split('T')[0];
+            return mockEvents.filter(event => {
+                const eventDate = new Date(event.date);
+                const eventDateStr = eventDate.toISOString().split('T')[0];
+                return eventDateStr === dateStr;
+            });
+        }
+
+        function getWeekStart(date) {
+            const d = new Date(date);
+            const day = d.getDay();
+            const diff = d.getDate() - day;
+            return new Date(d.setDate(diff));
+        }
+
+        function updateCalendar() {
+            log(`Updating calendar with view: ${calendarView}`);
+            if (calendarView === 'month') {
+                renderMonthView();
+            } else {
+                renderWeekView();
+            }
+        }
+
+        function changeCalendarView(view) {
+            log(`Changing calendar view to: ${view}`);
+            calendarView = view;
+            updateCalendar();
+        }
+
+        function previousMonth() {
+            log('Previous month clicked');
+            currentDate.setMonth(currentDate.getMonth() - 1);
+            updateCalendar();
+        }
+
+        function nextMonth() {
+            log('Next month clicked');
+            currentDate.setMonth(currentDate.getMonth() + 1);
+            updateCalendar();
+        }
+
+        function previousWeek() {
+            log('Previous week clicked');
+            currentDate.setDate(currentDate.getDate() - 7);
+            updateCalendar();
+        }
+
+        function nextWeek() {
+            log('Next week clicked');
+            currentDate.setDate(currentDate.getDate() + 7);
+            updateCalendar();
+        }
+
+        // Test functions
+        function testMonthView() {
+            log('=== Testing Month View ===');
+            changeCalendarView('month');
+        }
+
+        function testWeekView() {
+            log('=== Testing Week View ===');
+            changeCalendarView('week');
+        }
+
+        function testNavigation() {
+            log('=== Testing Navigation ===');
+            if (calendarView === 'month') {
+                nextMonth();
+            } else {
+                nextWeek();
+            }
+        }
+
+        function checkCalendarState() {
+            log('=== Current Calendar State ===');
+            log(`View: ${calendarView}`);
+            log(`Current Date: ${currentDate.toDateString()}`);
+            log(`Events: ${mockEvents.length}`);
+        }
+
+        // Initialize
+        log('Calendar test page loaded');
+        updateCalendar();
+    </script>
+</body>
+</html> 

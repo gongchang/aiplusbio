@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Other Computing Events Around Boston</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        /* Calendar Styles */
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 1px;
+            background-color: #dee2e6;
+            border: 1px solid #dee2e6;
+            border-radius: 0.375rem;
+            overflow: hidden;
+        }
+        
+        .calendar-weekdays {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            background-color: #f8f9fa;
+        }
+        
+        .calendar-day-header {
+            padding: 0.5rem;
+            text-align: center;
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: #6c757d;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .calendar-days {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+        }
+        
+        .calendar-day {
+            min-height: 120px;
+            padding: 0.5rem;
+            background-color: white;
+            border: 1px solid #dee2e6;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            position: relative;
+        }
+        
+        .calendar-day:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .calendar-day.today {
+            background-color: #e3f2fd;
+            border-color: #2196f3;
+        }
+        
+        .calendar-day.has-events {
+            background-color: #f0f8ff;
+        }
+        
+        .calendar-day.empty {
+            background-color: #f8f9fa;
+            cursor: default;
+        }
+        
+        .day-number {
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+        }
+        
+        .event-indicators {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2px;
+        }
+        
+        .event-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .event-indicator:hover {
+            transform: scale(1.2);
+        }
+        
+        .event-indicator.more {
+            background-color: #6c757d !important;
+            font-size: 0.6rem;
+            width: auto;
+            height: auto;
+            padding: 1px 3px;
+            border-radius: 3px;
+            color: white;
+            line-height: 1;
+        }
+        
+        .calendar-legend {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+        }
+        
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        
+        .host-filters {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .host-filters .form-check {
+            margin-bottom: 0.25rem;
+        }
+        
+        /* Day View Styles */
+        .day-view {
+            padding: 1rem;
+        }
+        
+        .day-header {
+            text-align: center;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 0.375rem;
+            background-color: #f8f9fa;
+        }
+        
+        .day-header.today {
+            background-color: #e3f2fd;
+            border: 2px solid #2196f3;
+        }
+        
+        .day-event-item {
+            border: 1px solid #dee2e6;
+            border-radius: 0.375rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background-color: white;
+            transition: box-shadow 0.2s;
+        }
+        
+        .day-event-item:hover {
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        /* Calendar Navigation */
+        .calendar-view-btn.active {
+            background-color: #0d6efd;
+            color: white;
+            border-color: #0d6efd;
+        }
+        
+        #calendarTitle {
+            font-weight: 600;
+            color: #495057;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <!-- Navigation -->
+        <div class="custom-navbar">
+            <div class="nav-container">
+                <a class="nav-brand" href="/">
+                    <i class="fas fa-calendar-alt me-1"></i>
+                    AI + Biology Seminars around Boston
+                </a>
+                <div class="nav-links">
+                    <a class="nav-link" href="/">
+                        <i class="fas fa-home me-1"></i>Home
+                    </a>
+                    <a class="nav-link active" href="/computing-events">
+                        <i class="fas fa-laptop-code me-1"></i>Computing Events
+                    </a>
+                    <a class="nav-link" href="/virtual-worldwide">
+                        <i class="fas fa-globe me-1"></i>Virtual Worldwide
+                    </a>
+                    <a class="nav-link" href="/social-media">
+                        <i class="fas fa-share-alt me-1"></i>Social Media
+                    </a>
+                </div>
+                <div class="nav-buttons">
+                    <button id="searchBtn" class="btn btn-light btn-sm">
+                        <i class="fas fa-search me-1"></i> Search Events
+                    </button>
+                    <button id="statsBtn" class="btn btn-outline-light btn-sm">
+                        <i class="fas fa-chart-bar me-1"></i> Stats
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="row flex-grow-1">
+            <!-- Left Panel - Events List -->
+            <div class="col-md-5 col-lg-4">
+                <div class="h-100 d-flex flex-column">
+                    <!-- Filters -->
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <h5 class="card-title">
+                                <i class="fas fa-filter me-2"></i>Filters
+                            </h5>
+                            
+                            <!-- Search Box -->
+                            <div class="mb-3">
+                                <label for="searchInput" class="form-label">Search Events</label>
+                                <input type="text" class="form-control" id="searchInput" 
+                                       placeholder="Search by title, description, or location...">
+                            </div>
+                            
+                            <!-- Cost Type Filters -->
+                            <div class="mb-3">
+                                <label class="form-label">Cost Type</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="freeFilter" checked>
+                                    <label class="form-check-label" for="freeFilter">
+                                        <i class="fas fa-gift me-1"></i> Free
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="paidFilter" checked>
+                                    <label class="form-check-label" for="paidFilter">
+                                        <i class="fas fa-dollar-sign me-1"></i> Paid
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="unknownFilter" checked>
+                                    <label class="form-check-label" for="unknownFilter">
+                                        <i class="fas fa-question me-1"></i> Unknown
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <!-- Host Filters -->
+                            <div class="mb-3">
+                                <label class="form-label">Hosts</label>
+                                <div id="hostFilters" class="host-filters">
+                                    <!-- Host checkboxes will be populated here -->
+                                </div>
+                            </div>
+                            
+                            <!-- Event Count -->
+                            <div class="text-muted small">
+                                <span id="eventCount">0</span> events found
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Events List -->
+                    <div class="card flex-grow-1">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-list me-2"></i>Computing Events
+                            </h5>
+                        </div>
+                        <div class="card-body p-0">
+                            <div id="eventsList" class="list-group list-group-flush">
+                                <!-- Events will be loaded here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel - Calendar -->
+            <div class="col-md-7 col-lg-8">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <div class="card">
+                            <div class="card-header">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h6 class="mb-0">
+                                        <i class="fas fa-calendar-week me-2"></i>Event Calendar
+                                    </h6>
+                                    <div class="btn-group btn-group-sm">
+                                        <button class="btn btn-outline-secondary calendar-view-btn" data-view="month">
+                                            <i class="fas fa-calendar-alt"></i> Month
+                                        </button>
+                                        <button class="btn btn-outline-secondary calendar-view-btn" data-view="week">
+                                            <i class="fas fa-calendar-week"></i> Week
+                                        </button>
+                                        <button class="btn btn-outline-secondary calendar-view-btn" data-view="day">
+                                            <i class="fas fa-calendar-day"></i> Day
+                                        </button>
+                                    </div>
+                                </div>
+                                <!-- Calendar Navigation -->
+                                <div class="d-flex justify-content-between align-items-center mt-2">
+                                    <button class="btn btn-outline-secondary btn-sm" id="prevMonthBtn">
+                                        <i class="fas fa-chevron-left"></i>
+                                    </button>
+                                    <h5 class="mb-0" id="calendarTitle">September 2025</h5>
+                                    <button class="btn btn-outline-secondary btn-sm" id="nextMonthBtn">
+                                        <i class="fas fa-chevron-right"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body p-0">
+                                <div id="calendarContainer" class="calendar-container">
+                                    <!-- Calendar will be populated here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Modal -->
+    <div class="modal fade" id="statsModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-chart-bar me-2"></i>Computing Events Statistics
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="statsContent">
+                    <!-- Stats will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Event Details Modal -->
+    <div class="modal fade" id="eventModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="eventModalTitle"></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="eventModalBody">
+                    <!-- Event details will be loaded here -->
+                </div>
+                <div class="modal-footer">
+                    <a href="#" id="eventModalLink" class="btn btn-primary" target="_blank">
+                        <i class="fas fa-external-link-alt me-1"></i>View Event
+                    </a>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search Modal -->
+    <div class="modal fade" id="searchModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-search me-2"></i>Search for New Events
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        This will search for new computing events in the Boston area using Tavily API.
+                        The search looks for events that are:
+                        <ul class="mb-0 mt-2">
+                            <li>Computing-related (AI, ML, cloud computing, etc.)</li>
+                            <li>Formal events (workshops, conferences, meetups, etc.)</li>
+                            <li>Local to the Greater Boston area</li>
+                            <li>Not overlapping with existing tracked websites</li>
+                        </ul>
+                    </div>
+                    <div id="searchProgress" class="d-none">
+                        <div class="progress">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                 role="progressbar" style="width: 100%">
+                                Searching for events...
+                            </div>
+                        </div>
+                    </div>
+                    <div id="searchResults" class="d-none">
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle me-2"></i>
+                            <span id="searchResultText"></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" id="startSearchBtn">
+                        <i class="fas fa-search me-1"></i> Start Search
+                    </button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Computing Events Page JavaScript
+        let allEvents = [];
+        let filteredEvents = [];
+        let allHosts = new Set();
+        
+        // Calendar navigation variables
+        let currentDate = new Date();
+        let currentView = 'month';
+
+        // Load events when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            loadEvents();
+            loadStats();
+            
+            // Set up event listeners
+            setupEventListeners();
+            
+            // Set default active view button
+            document.querySelector('.calendar-view-btn[data-view="month"]').classList.add('active');
+        });
+
+        function setupEventListeners() {
+            // Search input
+            document.getElementById('searchInput').addEventListener('input', filterEvents);
+            
+            // Cost type filters
+            document.getElementById('freeFilter').addEventListener('change', filterEvents);
+            document.getElementById('paidFilter').addEventListener('change', filterEvents);
+            document.getElementById('unknownFilter').addEventListener('change', filterEvents);
+            
+            // Search button
+            document.getElementById('searchBtn').addEventListener('click', showSearchModal);
+            document.getElementById('startSearchBtn').addEventListener('click', performSearch);
+            
+            // Stats button
+            document.getElementById('statsBtn').addEventListener('click', showStatsModal);
+            
+            // Calendar view buttons
+            document.querySelectorAll('.calendar-view-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    document.querySelectorAll('.calendar-view-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    currentView = this.dataset.view;
+                    updateCalendar();
+                });
+            });
+            
+            // Calendar navigation buttons
+            document.getElementById('prevMonthBtn').addEventListener('click', function() {
+                if (currentView === 'month') {
+                    currentDate.setMonth(currentDate.getMonth() - 1);
+                } else if (currentView === 'week') {
+                    currentDate.setDate(currentDate.getDate() - 7);
+                } else if (currentView === 'day') {
+                    currentDate.setDate(currentDate.getDate() - 1);
+                }
+                updateCalendar();
+            });
+            
+            document.getElementById('nextMonthBtn').addEventListener('click', function() {
+                if (currentView === 'month') {
+                    currentDate.setMonth(currentDate.getMonth() + 1);
+                } else if (currentView === 'week') {
+                    currentDate.setDate(currentDate.getDate() + 7);
+                } else if (currentView === 'day') {
+                    currentDate.setDate(currentDate.getDate() + 1);
+                }
+                updateCalendar();
+            });
+        }
+
+        async function loadEvents() {
+            try {
+                const response = await fetch('/api/computing-events');
+                const data = await response.json();
+                
+                if (data.success) {
+                    allEvents = data.events;
+                    updateHostFilters();
+                    filterEvents();
+                    updateCalendar();
+                } else {
+                    console.error('Error loading events:', data.error);
+                    showError('Failed to load events');
+                }
+            } catch (error) {
+                console.error('Error loading events:', error);
+                showError('Failed to load events');
+            }
+        }
+
+        function updateHostFilters() {
+            const hostFiltersContainer = document.getElementById('hostFilters');
+            allHosts.clear();
+            
+            // Collect all unique hosts
+            allEvents.forEach(event => {
+                if (event.host) {
+                    allHosts.add(event.host);
+                }
+            });
+            
+            // Create checkboxes for each host
+            hostFiltersContainer.innerHTML = '';
+            Array.from(allHosts).sort().forEach(host => {
+                const div = document.createElement('div');
+                div.className = 'form-check';
+                div.innerHTML = `
+                    <input class="form-check-input host-checkbox" type="checkbox" 
+                           id="host_${host.replace(/\s+/g, '_')}" value="${host}" checked>
+                    <label class="form-check-label" for="host_${host.replace(/\s+/g, '_')}">
+                        ${host}
+                    </label>
+                `;
+                hostFiltersContainer.appendChild(div);
+                
+                // Add event listener
+                div.querySelector('.host-checkbox').addEventListener('change', filterEvents);
+            });
+        }
+
+        function filterEvents() {
+            const searchQuery = document.getElementById('searchInput').value.toLowerCase();
+            const freeFilter = document.getElementById('freeFilter').checked;
+            const paidFilter = document.getElementById('paidFilter').checked;
+            const unknownFilter = document.getElementById('unknownFilter').checked;
+            
+            // Get selected hosts
+            const selectedHosts = new Set();
+            document.querySelectorAll('.host-checkbox:checked').forEach(checkbox => {
+                selectedHosts.add(checkbox.value);
+            });
+            
+            filteredEvents = allEvents.filter(event => {
+                // Search filter
+                if (searchQuery) {
+                    const searchableText = `${event.title} ${event.description} ${event.location}`.toLowerCase();
+                    if (!searchableText.includes(searchQuery)) {
+                        return false;
+                    }
+                }
+                
+                // Cost type filter
+                const costType = event.cost_type || 'Unknown';
+                if (costType === 'Free' && !freeFilter) return false;
+                if (costType === 'Paid' && !paidFilter) return false;
+                if (costType === 'Unknown' && !unknownFilter) return false;
+                
+                // Host filter
+                if (selectedHosts.size > 0 && !selectedHosts.has(event.host)) {
+                    return false;
+                }
+                
+                return true;
+            });
+            
+            displayEvents();
+            updateEventCount();
+        }
+
+        function displayEvents() {
+            const eventsList = document.getElementById('eventsList');
+            
+            if (filteredEvents.length === 0) {
+                eventsList.innerHTML = `
+                    <div class="list-group-item text-center text-muted py-4">
+                        <i class="fas fa-search fa-2x mb-3"></i>
+                        <p>No events found matching your criteria.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            eventsList.innerHTML = filteredEvents.map(event => `
+                <div class="list-group-item list-group-item-action event-item" 
+                     data-event-id="${event.id}" onclick="showEventDetails(${event.id})">
+                    <div class="d-flex w-100 justify-content-between align-items-start">
+                        <h6 class="mb-1 event-title">${event.title}</h6>
+                        <div class="d-flex flex-column align-items-end">
+                            <small class="text-muted">
+                                <span class="badge bg-${getCostTypeColor(event.cost_type)} me-1">
+                                    ${event.cost_type || 'Unknown'}
+                                </span>
+                                <span class="badge bg-secondary">${event.host || 'Other'}</span>
+                            </small>
+                        </div>
+                    </div>
+                    <p class="mb-1 event-description">${truncateText(event.description, 150)}</p>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <small class="text-muted">
+                            <i class="fas fa-calendar me-1"></i>
+                            ${formatDate(event.date)}
+                            ${event.time ? `<i class="fas fa-clock ms-2 me-1"></i>${event.time}` : ''}
+                        </small>
+                        <small class="text-muted">
+                            <i class="fas fa-map-marker-alt me-1"></i>
+                            ${event.location || 'Boston Area'}
+                        </small>
+                    </div>
+                    ${event.is_virtual ? '<small class="text-info"><i class="fas fa-video me-1"></i>Virtual Event</small>' : ''}
+                    ${event.requires_registration ? '<small class="text-warning ms-2"><i class="fas fa-user-plus me-1"></i>Registration Required</small>' : ''}
+                </div>
+            `).join('');
+        }
+
+        function getCostTypeColor(costType) {
+            switch (costType) {
+                case 'Free': return 'success';
+                case 'Paid': return 'warning';
+                default: return 'secondary';
+            }
+        }
+
+        function truncateText(text, maxLength) {
+            if (!text) return '';
+            return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            try {
+                const date = new Date(dateStr);
+                return date.toLocaleDateString('en-US', { 
+                    month: 'short', 
+                    day: 'numeric',
+                    year: 'numeric'
+                });
+            } catch (e) {
+                return dateStr;
+            }
+        }
+
+        function updateEventCount() {
+            document.getElementById('eventCount').textContent = filteredEvents.length;
+        }
+
+        function showEventDetails(eventId) {
+            const event = allEvents.find(e => e.id === eventId);
+            if (!event) return;
+            
+            document.getElementById('eventModalTitle').textContent = event.title;
+            document.getElementById('eventModalLink').href = event.url;
+            
+            document.getElementById('eventModalBody').innerHTML = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Event Details</h6>
+                        <p><strong>Date:</strong> ${formatDate(event.date)}</p>
+                        ${event.time ? `<p><strong>Time:</strong> ${event.time}</p>` : ''}
+                        <p><strong>Location:</strong> ${event.location || 'Boston Area'}</p>
+                        <p><strong>Host:</strong> ${event.host || 'Other'}</p>
+                        <p><strong>Cost:</strong> <span class="badge bg-${getCostTypeColor(event.cost_type)}">${event.cost_type || 'Unknown'}</span></p>
+                        ${event.is_virtual ? '<p><span class="badge bg-info">Virtual Event</span></p>' : ''}
+                        ${event.requires_registration ? '<p><span class="badge bg-warning">Registration Required</span></p>' : ''}
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Description</h6>
+                        <p>${event.description || 'No description available.'}</p>
+                        ${event.categories && event.categories.length > 0 ? `
+                            <h6>Categories</h6>
+                            <div>
+                                ${event.categories.map(cat => `<span class="badge bg-light text-dark me-1">${cat}</span>`).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+            
+            const modal = new bootstrap.Modal(document.getElementById('eventModal'));
+            modal.show();
+        }
+
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/computing-events/stats');
+                const data = await response.json();
+                
+                if (data.success) {
+                    window.computingEventStats = data.stats;
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        function showStatsModal() {
+            const stats = window.computingEventStats;
+            if (!stats) {
+                showError('Statistics not available');
+                return;
+            }
+            
+            document.getElementById('statsContent').innerHTML = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Event Overview</h6>
+                        <p><strong>Total Events:</strong> ${stats.total_events}</p>
+                        <p><strong>Today:</strong> ${stats.today_events}</p>
+                        <p><strong>This Week:</strong> ${stats.week_events}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>By Cost Type</h6>
+                        ${Object.entries(stats.cost_type_stats).map(([type, count]) => 
+                            `<p><strong>${type}:</strong> ${count}</p>`
+                        ).join('')}
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <h6>Top Hosts</h6>
+                        <div class="row">
+                            ${Object.entries(stats.host_stats).map(([host, count]) => 
+                                `<div class="col-md-4"><p><strong>${host}:</strong> ${count}</p></div>`
+                            ).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            const modal = new bootstrap.Modal(document.getElementById('statsModal'));
+            modal.show();
+        }
+
+        function showSearchModal() {
+            const modal = new bootstrap.Modal(document.getElementById('searchModal'));
+            modal.show();
+        }
+
+        async function performSearch() {
+            const progressDiv = document.getElementById('searchProgress');
+            const resultsDiv = document.getElementById('searchResults');
+            const startBtn = document.getElementById('startSearchBtn');
+            
+            // Show progress
+            progressDiv.classList.remove('d-none');
+            resultsDiv.classList.add('d-none');
+            startBtn.disabled = true;
+            
+            try {
+                const response = await fetch('/api/computing-events/search', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('searchResultText').textContent = 
+                        `Found ${data.events_found} new events. ${data.events_saved} events were saved to the database.`;
+                    
+                    // Reload events
+                    await loadEvents();
+                } else {
+                    document.getElementById('searchResultText').textContent = 
+                        `Search failed: ${data.error}`;
+                }
+                
+                progressDiv.classList.add('d-none');
+                resultsDiv.classList.remove('d-none');
+                
+            } catch (error) {
+                console.error('Search error:', error);
+                document.getElementById('searchResultText').textContent = 
+                    `Search failed: ${error.message}`;
+                progressDiv.classList.add('d-none');
+                resultsDiv.classList.remove('d-none');
+            } finally {
+                startBtn.disabled = false;
+            }
+        }
+
+        function updateCalendar() {
+            const calendarContainer = document.getElementById('calendarContainer');
+            const calendarTitle = document.getElementById('calendarTitle');
+            
+            if (filteredEvents.length === 0) {
+                calendarContainer.innerHTML = `
+                    <div class="text-center p-4">
+                        <i class="fas fa-calendar-alt fa-3x text-muted mb-3"></i>
+                        <p class="text-muted">No events to display</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Group events by date
+            const eventsByDate = {};
+            filteredEvents.forEach(event => {
+                const date = event.date || 'TBD';
+                if (!eventsByDate[date]) {
+                    eventsByDate[date] = [];
+                }
+                eventsByDate[date].push(event);
+            });
+            
+            // Update calendar title
+            if (currentView === 'month') {
+                calendarTitle.textContent = currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            } else if (currentView === 'week') {
+                const weekStart = new Date(currentDate);
+                weekStart.setDate(currentDate.getDate() - currentDate.getDay());
+                const weekEnd = new Date(weekStart);
+                weekEnd.setDate(weekStart.getDate() + 6);
+                calendarTitle.textContent = `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+            } else if (currentView === 'day') {
+                calendarTitle.textContent = currentDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+            }
+            
+            let calendarHTML = '';
+            
+            if (currentView === 'month') {
+                calendarHTML = generateMonthView(eventsByDate);
+            } else if (currentView === 'week') {
+                calendarHTML = generateWeekView(eventsByDate);
+            } else if (currentView === 'day') {
+                calendarHTML = generateDayView(eventsByDate);
+            }
+            
+            calendarContainer.innerHTML = calendarHTML;
+        }
+        
+        function generateMonthView(eventsByDate) {
+            const currentMonth = currentDate.getMonth();
+            const currentYear = currentDate.getFullYear();
+            const today = new Date();
+            
+            // Get days in current month
+            const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+            const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
+            
+            let calendarHTML = `
+                <div class="calendar-grid">
+                    <div class="calendar-weekdays">
+                        <div class="calendar-day-header">Sun</div>
+                        <div class="calendar-day-header">Mon</div>
+                        <div class="calendar-day-header">Tue</div>
+                        <div class="calendar-day-header">Wed</div>
+                        <div class="calendar-day-header">Thu</div>
+                        <div class="calendar-day-header">Fri</div>
+                        <div class="calendar-day-header">Sat</div>
+                    </div>
+                    <div class="calendar-days">
+            `;
+            
+            // Add empty cells for days before the first day of the month
+            for (let i = 0; i < firstDayOfMonth; i++) {
+                calendarHTML += '<div class="calendar-day empty"></div>';
+            }
+            
+            // Add days of the month
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const dayEvents = eventsByDate[dateStr] || [];
+                const isToday = day === today.getDate() && currentMonth === today.getMonth() && currentYear === today.getFullYear();
+                
+                calendarHTML += `
+                    <div class="calendar-day ${isToday ? 'today' : ''} ${dayEvents.length > 0 ? 'has-events' : ''}" 
+                         onclick="showDayEvents('${dateStr}', ${JSON.stringify(dayEvents).replace(/"/g, '&quot;')})">
+                        <div class="day-number">${day}</div>
+                        ${dayEvents.length > 0 ? `
+                            <div class="event-indicators">
+                                ${dayEvents.slice(0, 3).map((event, index) => `
+                                    <div class="event-indicator" style="background-color: ${getEventColor(event.cost_type)}" 
+                                         title="${event.title}" 
+                                         onclick="event.stopPropagation(); window.open('${event.url}', '_blank');"></div>
+                                `).join('')}
+                                ${dayEvents.length > 3 ? `<div class="event-indicator more" onclick="event.stopPropagation(); showDayEvents('${dateStr}', ${JSON.stringify(dayEvents).replace(/"/g, '&quot;')})">+${dayEvents.length - 3}</div>` : ''}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+            
+            calendarHTML += `
+                    </div>
+                </div>
+                <div class="calendar-legend mt-3">
+                    <div class="legend-item">
+                        <div class="legend-color" style="background-color: #28a745;"></div>
+                        <span>Free Events</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background-color: #ffc107;"></div>
+                        <span>Paid Events</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background-color: #6c757d;"></div>
+                        <span>Unknown Cost</span>
+                    </div>
+                </div>
+            `;
+            
+            return calendarHTML;
+        }
+        
+        function generateWeekView(eventsByDate) {
+            const weekStart = new Date(currentDate);
+            weekStart.setDate(currentDate.getDate() - currentDate.getDay());
+            const today = new Date();
+            
+            let calendarHTML = `
+                <div class="calendar-grid">
+                    <div class="calendar-weekdays">
+                        <div class="calendar-day-header">Sun</div>
+                        <div class="calendar-day-header">Mon</div>
+                        <div class="calendar-day-header">Tue</div>
+                        <div class="calendar-day-header">Wed</div>
+                        <div class="calendar-day-header">Thu</div>
+                        <div class="calendar-day-header">Fri</div>
+                        <div class="calendar-day-header">Sat</div>
+                    </div>
+                    <div class="calendar-days">
+            `;
+            
+            // Add 7 days of the week
+            for (let i = 0; i < 7; i++) {
+                const dayDate = new Date(weekStart);
+                dayDate.setDate(weekStart.getDate() + i);
+                const dateStr = dayDate.toISOString().split('T')[0];
+                const dayEvents = eventsByDate[dateStr] || [];
+                const isToday = dayDate.toDateString() === today.toDateString();
+                
+                calendarHTML += `
+                    <div class="calendar-day ${isToday ? 'today' : ''} ${dayEvents.length > 0 ? 'has-events' : ''}" 
+                         onclick="showDayEvents('${dateStr}', ${JSON.stringify(dayEvents).replace(/"/g, '&quot;')})">
+                        <div class="day-number">${dayDate.getDate()}</div>
+                        ${dayEvents.length > 0 ? `
+                            <div class="event-indicators">
+                                ${dayEvents.slice(0, 5).map((event, index) => `
+                                    <div class="event-indicator" style="background-color: ${getEventColor(event.cost_type)}" 
+                                         title="${event.title}" 
+                                         onclick="event.stopPropagation(); window.open('${event.url}', '_blank');"></div>
+                                `).join('')}
+                                ${dayEvents.length > 5 ? `<div class="event-indicator more" onclick="event.stopPropagation(); showDayEvents('${dateStr}', ${JSON.stringify(dayEvents).replace(/"/g, '&quot;')})">+${dayEvents.length - 5}</div>` : ''}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+            
+            calendarHTML += `
+                    </div>
+                </div>
+            `;
+            
+            return calendarHTML;
+        }
+        
+        function generateDayView(eventsByDate) {
+            const dateStr = currentDate.toISOString().split('T')[0];
+            const dayEvents = eventsByDate[dateStr] || [];
+            const today = new Date();
+            const isToday = currentDate.toDateString() === today.toDateString();
+            
+            let calendarHTML = `
+                <div class="day-view">
+                    <div class="day-header ${isToday ? 'today' : ''}">
+                        <h4>${currentDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</h4>
+                    </div>
+                    <div class="day-events">
+            `;
+            
+            if (dayEvents.length === 0) {
+                calendarHTML += `
+                    <div class="text-center p-4">
+                        <i class="fas fa-calendar-day fa-2x text-muted mb-3"></i>
+                        <p class="text-muted">No events scheduled for this day</p>
+                    </div>
+                `;
+            } else {
+                dayEvents.forEach(event => {
+                    calendarHTML += `
+                        <div class="day-event-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div class="flex-grow-1">
+                                    <h6 class="mb-1">
+                                        <a href="${event.url}" target="_blank" class="text-decoration-none">
+                                            ${event.title}
+                                            <i class="fas fa-external-link-alt ms-1" style="font-size: 0.7em;"></i>
+                                        </a>
+                                    </h6>
+                                    <p class="mb-1 text-muted">${event.host || 'Other'}</p>
+                                    <small class="text-muted">
+                                        <i class="fas fa-clock me-1"></i>${event.time || 'TBD'}
+                                        <i class="fas fa-map-marker-alt ms-2 me-1"></i>${event.location || 'Boston Area'}
+                                    </small>
+                                </div>
+                                <span class="badge bg-${getCostTypeColor(event.cost_type)}">${event.cost_type || 'Unknown'}</span>
+                            </div>
+                            ${event.description ? `<p class="mt-2 small text-muted">${truncateText(event.description, 150)}</p>` : ''}
+                        </div>
+                    `;
+                });
+            }
+            
+            calendarHTML += `
+                    </div>
+                </div>
+            `;
+            
+            return calendarHTML;
+        }
+        
+        function getEventColor(costType) {
+            switch (costType) {
+                case 'Free': return '#28a745';
+                case 'Paid': return '#ffc107';
+                default: return '#6c757d';
+            }
+        }
+        
+        function showDayEvents(dateStr, events) {
+            if (events.length === 0) return;
+            
+            const eventList = events.map(event => `
+                <div class="list-group-item">
+                    <div class="d-flex w-100 justify-content-between">
+                        <h6 class="mb-1">
+                            <a href="${event.url}" target="_blank" class="text-decoration-none">
+                                ${event.title}
+                                <i class="fas fa-external-link-alt ms-1" style="font-size: 0.7em;"></i>
+                            </a>
+                        </h6>
+                        <small class="text-muted">${event.time || ''}</small>
+                    </div>
+                    <p class="mb-1">
+                        <span class="badge bg-${getCostTypeColor(event.cost_type)} me-2">${event.cost_type || 'Unknown'}</span>
+                        ${event.host || 'Other'}
+                    </p>
+                    <small class="text-muted">
+                        <i class="fas fa-map-marker-alt me-1"></i>${event.location || 'Boston Area'}
+                    </small>
+                    ${event.description ? `<p class="mt-2 small text-muted">${truncateText(event.description, 100)}</p>` : ''}
+                </div>
+            `).join('');
+            
+            const modalHTML = `
+                <div class="modal fade" id="dayEventsModal" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">Events on ${new Date(dateStr).toLocaleDateString()}</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="list-group">
+                                    ${eventList}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Remove existing modal if any
+            const existingModal = document.getElementById('dayEventsModal');
+            if (existingModal) {
+                existingModal.remove();
+            }
+            
+            // Add new modal
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+            
+            // Show modal
+            const modal = new bootstrap.Modal(document.getElementById('dayEventsModal'));
+            modal.show();
+        }
+
+        function showError(message) {
+            // Simple error display
+            const eventsList = document.getElementById('eventsList');
+            eventsList.innerHTML = `
+                <div class="list-group-item text-center text-danger py-4">
+                    <i class="fas fa-exclamation-triangle fa-2x mb-3"></i>
+                    <p>${message}</p>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>

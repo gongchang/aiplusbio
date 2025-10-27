@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Calendar Debug Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .debug-info { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .event { background: #e3f2fd; padding: 5px; margin: 2px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <h1>Calendar Debug Test</h1>
+    
+    <div class="debug-info">
+        <h3>Testing Date Matching</h3>
+        <div id="dateTest"></div>
+    </div>
+    
+    <div class="debug-info">
+        <h3>Sample Events from API</h3>
+        <div id="eventsTest"></div>
+    </div>
+    
+    <div class="debug-info">
+        <h3>Calendar Container</h3>
+        <div id="calendarContainer" style="border: 1px solid #ccc; min-height: 200px; padding: 10px;">
+            Calendar will appear here
+        </div>
+    </div>
+
+    <script>
+        // Test date matching
+        function testDateMatching() {
+            const testDate = new Date('2025-08-14');
+            const dateStr = testDate.toISOString().split('T')[0];
+            
+            document.getElementById('dateTest').innerHTML = `
+                <p><strong>Test Date:</strong> ${testDate.toDateString()}</p>
+                <p><strong>Date String:</strong> ${dateStr}</p>
+                <p><strong>Expected Match:</strong> 2025-08-14</p>
+            `;
+        }
+        
+        // Test events
+        async function testEvents() {
+            try {
+                const response = await fetch('/api/events');
+                const data = await response.json();
+                const events = data.events || [];
+                
+                const eventsHTML = events.slice(0, 5).map(event => `
+                    <div class="event">
+                        <strong>${event.title}</strong><br>
+                        Date: ${event.date} | Categories: ${event.categories.join(', ')}
+                    </div>
+                `).join('');
+                
+                document.getElementById('eventsTest').innerHTML = eventsHTML;
+                
+                // Test date matching with real events
+                const testDate = new Date('2025-08-14');
+                const dateStr = testDate.toISOString().split('T')[0];
+                const matchingEvents = events.filter(event => {
+                    const eventDate = new Date(event.date);
+                    const eventDateStr = eventDate.toISOString().split('T')[0];
+                    return eventDateStr === dateStr;
+                });
+                
+                console.log('Matching events for 2025-08-14:', matchingEvents);
+                
+            } catch (error) {
+                console.error('Error fetching events:', error);
+                document.getElementById('eventsTest').innerHTML = '<p style="color: red;">Error loading events</p>';
+            }
+        }
+        
+        // Initialize tests
+        testDateMatching();
+        testEvents();
+    </script>
+</body>
+</html> 

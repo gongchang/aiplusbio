@@ -1,0 +1,15 @@
+flask==2.3.3
+flask-cors==4.0.0
+requests==2.31.0
+beautifulsoup4==4.12.2
+lxml==4.9.3
+openai>=1.0.0
+python-dateutil==2.8.2
+schedule==1.2.0
+sqlalchemy==2.0.23
+# sqlite3 is included with Python standard library
+python-dotenv==1.0.0
+feedparser==6.0.10
+selenium==4.15.2
+webdriver-manager==4.0.1
+eventbrite-python==1.0.0 
