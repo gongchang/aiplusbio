@@ -1,1 +1,47 @@
-aiplusbio
+# Environment files with sensitive data
+.env
+config.env.example
+config.production.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environment
+venv/
+env/
+ENV/
+aiplusbio/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Google Cloud Build
+cloudbuild.yaml
+
+# Docker
+Dockerfile
+docker-compose.yml

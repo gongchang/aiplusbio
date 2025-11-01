@@ -9,44 +9,62 @@
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
         /* Calendar Styles */
+        .calendar-container {
+            min-height: 1800px;
+            max-height: 2000px;
+            height: 100%;
+        }
+        
         .calendar-grid {
-            display: grid;
-            grid-template-columns: repeat(7, 1fr);
+            display: flex;
+            flex-direction: column;
             gap: 1px;
             background-color: #dee2e6;
             border: 1px solid #dee2e6;
             border-radius: 0.375rem;
             overflow: hidden;
+            min-height: 1600px;
+            max-height: 1800px;
+            height: 100%;
         }
         
         .calendar-weekdays {
             display: grid;
             grid-template-columns: repeat(7, 1fr);
+            gap: 1px;
             background-color: #f8f9fa;
         }
         
         .calendar-day-header {
-            padding: 0.5rem;
+            padding: 1rem;
             text-align: center;
             font-weight: 600;
-            font-size: 0.875rem;
+            font-size: 1.1rem;
             color: #6c757d;
             border-bottom: 1px solid #dee2e6;
+            background-color: #f8f9fa;
         }
         
         .calendar-days {
             display: grid;
             grid-template-columns: repeat(7, 1fr);
+            grid-template-rows: repeat(6, 1fr);
+            gap: 1px;
+            flex: 1;
+            min-height: 1400px;
+            max-height: 1520px;
         }
         
         .calendar-day {
-            min-height: 120px;
-            padding: 0.5rem;
+            min-height: 220px;
+            padding: 1rem;
             background-color: white;
             border: 1px solid #dee2e6;
             cursor: pointer;
             transition: background-color 0.2s;
             position: relative;
+            display: flex;
+            flex-direction: column;
         }
         
         .calendar-day:hover {
@@ -67,39 +85,71 @@
             cursor: default;
         }
         
+        .calendar-day.other-month {
+            background-color: #f8f9fa;
+            color: #adb5bd;
+        }
+        
+        .calendar-day.other-month .day-number {
+            color: #adb5bd;
+        }
+        
         .day-number {
-            font-weight: 500;
-            margin-bottom: 0.25rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            font-size: 1.2rem;
+            position: relative;
         }
         
-        .event-indicators {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 2px;
+        .calendar-events {
+            margin-top: 0.5rem;
+            max-height: calc(100% - 40px);
+            overflow-y: auto;
+            flex: 1;
         }
         
-        .event-indicator {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            flex-shrink: 0;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-        
-        .event-indicator:hover {
-            transform: scale(1.2);
-        }
-        
-        .event-indicator.more {
-            background-color: #6c757d !important;
-            font-size: 0.6rem;
-            width: auto;
-            height: auto;
-            padding: 1px 3px;
+        .calendar-event {
+            font-size: 0.75rem;
+            padding: 3px 6px;
+            margin: 2px 0;
             border-radius: 3px;
-            color: white;
-            line-height: 1;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: all 0.2s;
+        }
+        
+        .calendar-event:hover {
+            transform: scale(1.02);
+            z-index: 10;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .calendar-event.free-event {
+            background: #d4edda;
+            color: #155724;
+            border-left: 3px solid #28a745;
+        }
+        
+        .calendar-event.paid-event {
+            background: #fff3cd;
+            color: #856404;
+            border-left: 3px solid #ffc107;
+        }
+        
+        .calendar-event.unknown-event {
+            background: #e2e3e5;
+            color: #383d41;
+            border-left: 3px solid #6c757d;
+        }
+        
+        .calendar-event.virtual {
+            border-left: 3px solid #17a2b8;
+        }
+        
+        .calendar-event.onsite {
+            border-left: 3px solid #dc3545;
         }
         
         .calendar-legend {
@@ -133,15 +183,19 @@
         
         /* Day View Styles */
         .day-view {
-            padding: 1rem;
+            padding: 2rem;
+            min-height: 1600px;
+            max-height: 1800px;
+            overflow-y: auto;
         }
         
         .day-header {
             text-align: center;
-            padding: 1rem;
-            margin-bottom: 1rem;
+            padding: 2rem;
+            margin-bottom: 2rem;
             border-radius: 0.375rem;
             background-color: #f8f9fa;
+            font-size: 1.5rem;
         }
         
         .day-header.today {
@@ -153,13 +207,13 @@
             border: 1px solid #dee2e6;
             border-radius: 0.375rem;
             padding: 1rem;
-            margin-bottom: 1rem;
+            margin-bottom: 0.75rem;
             background-color: white;
             transition: box-shadow 0.2s;
         }
         
         .day-event-item:hover {
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
         }
         
         /* Calendar Navigation */
@@ -251,6 +305,41 @@
                                 </div>
                             </div>
                             
+                            <!-- Source Filters -->
+                            <div class="mb-3">
+                                <label class="form-label">Source</label>
+                                <div class="form-check">
+                                    <input class="form-check-input source-checkbox" type="checkbox" id="sourceTavily" value="Tavily" checked>
+                                    <label class="form-check-label" for="sourceTavily">
+                                        <i class="fas fa-search me-1"></i> Tavily
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input source-checkbox" type="checkbox" id="sourceMeetup" value="Meetup RSS" checked>
+                                    <label class="form-check-label" for="sourceMeetup">
+                                        <i class="fas fa-users me-1"></i> Meetup RSS
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input source-checkbox" type="checkbox" id="sourceEventbrite" value="Eventbrite" checked>
+                                    <label class="form-check-label" for="sourceEventbrite">
+                                        <i class="fas fa-ticket-alt me-1"></i> Eventbrite
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input source-checkbox" type="checkbox" id="sourceTechRSS" value="Tech RSS Feed" checked>
+                                    <label class="form-check-label" for="sourceTechRSS">
+                                        <i class="fas fa-rss me-1"></i> Tech RSS Feed
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input source-checkbox" type="checkbox" id="sourceCustomized" value="Customized" checked>
+                                    <label class="form-check-label" for="sourceCustomized">
+                                        <i class="fas fa-building me-1"></i> Customized
+                                    </label>
+                                </div>
+                            </div>
+                            
                             <!-- Host Filters -->
                             <div class="mb-3">
                                 <label class="form-label">Hosts</label>
@@ -284,9 +373,9 @@
 
             <!-- Right Panel - Calendar -->
             <div class="col-md-7 col-lg-8">
-                <div class="card h-100">
-                    <div class="card-body">
-                        <div class="card">
+                <div class="card h-100 d-flex flex-column">
+                    <div class="card-body p-2 flex-grow-1 d-flex flex-column">
+                        <div class="card flex-grow-1 border-0 d-flex flex-column">
                             <div class="card-header">
                                 <div class="d-flex justify-content-between align-items-center">
                                     <h6 class="mb-0">
@@ -306,17 +395,17 @@
                                 </div>
                                 <!-- Calendar Navigation -->
                                 <div class="d-flex justify-content-between align-items-center mt-2">
-                                    <button class="btn btn-outline-secondary btn-sm" id="prevMonthBtn">
+                                    <button class="btn btn-outline-secondary btn-sm" id="prevMonthBtn" title="Previous">
                                         <i class="fas fa-chevron-left"></i>
                                     </button>
                                     <h5 class="mb-0" id="calendarTitle">September 2025</h5>
-                                    <button class="btn btn-outline-secondary btn-sm" id="nextMonthBtn">
+                                    <button class="btn btn-outline-secondary btn-sm" id="nextMonthBtn" title="Next">
                                         <i class="fas fa-chevron-right"></i>
                                     </button>
                                 </div>
                             </div>
-                            <div class="card-body p-0">
-                                <div id="calendarContainer" class="calendar-container">
+                            <div class="card-body p-2 flex-grow-1 d-flex flex-column">
+                                <div id="calendarContainer" class="calendar-container flex-grow-1 d-flex flex-column">
                                     <!-- Calendar will be populated here -->
                                 </div>
                             </div>
@@ -445,6 +534,11 @@
             document.getElementById('paidFilter').addEventListener('change', filterEvents);
             document.getElementById('unknownFilter').addEventListener('change', filterEvents);
             
+            // Source filters
+            document.querySelectorAll('.source-checkbox').forEach(checkbox => {
+                checkbox.addEventListener('change', filterEvents);
+            });
+            
             // Search button
             document.getElementById('searchBtn').addEventListener('click', showSearchModal);
             document.getElementById('startSearchBtn').addEventListener('click', performSearch);
@@ -460,6 +554,21 @@
                     currentView = this.dataset.view;
                     updateCalendar();
                 });
+            });
+            
+            // Calendar week day header clicks (switch to day view)
+            document.addEventListener('click', function(e) {
+                if (e.target.closest('.calendar-week-day-header')) {
+                    const header = e.target.closest('.calendar-week-day-header');
+                    const dateStr = header.getAttribute('data-date');
+                    if (dateStr && currentView === 'week') {
+                        currentDate = new Date(dateStr);
+                        currentView = 'day';
+                        document.querySelectorAll('.calendar-view-btn').forEach(b => b.classList.remove('active'));
+                        document.querySelector('.calendar-view-btn[data-view="day"]').classList.add('active');
+                        updateCalendar();
+                    }
+                }
             });
             
             // Calendar navigation buttons
@@ -493,6 +602,7 @@
                 
                 if (data.success) {
                     allEvents = data.events;
+                    console.log(`Loaded ${allEvents.length} events from API`);
                     updateHostFilters();
                     filterEvents();
                     updateCalendar();
@@ -542,6 +652,16 @@
             const paidFilter = document.getElementById('paidFilter').checked;
             const unknownFilter = document.getElementById('unknownFilter').checked;
             
+            // Get selected sources
+            const selectedSources = new Set();
+            document.querySelectorAll('.source-checkbox:checked').forEach(checkbox => {
+                selectedSources.add(checkbox.value);
+            });
+            
+            // If no sources selected, show all events (don't filter by source)
+            // This prevents issues on initial load
+            const filterBySource = selectedSources.size > 0;
+            
             // Get selected hosts
             const selectedHosts = new Set();
             document.querySelectorAll('.host-checkbox:checked').forEach(checkbox => {
@@ -562,6 +682,15 @@
                 if (costType === 'Free' && !freeFilter) return false;
                 if (costType === 'Paid' && !paidFilter) return false;
                 if (costType === 'Unknown' && !unknownFilter) return false;
+                
+                // Source filter
+                if (filterBySource) {
+                    const eventSource = event.source || 'Unknown';
+                    // Check if event source matches any selected source
+                    if (!selectedSources.has(eventSource)) {
+                        return false;
+                    }
+                }
                 
                 // Host filter
                 if (selectedHosts.size > 0 && !selectedHosts.has(event.host)) {
@@ -598,6 +727,7 @@
                                 <span class="badge bg-${getCostTypeColor(event.cost_type)} me-1">
                                     ${event.cost_type || 'Unknown'}
                                 </span>
+                                <span class="badge bg-info me-1">${event.source || 'Unknown'}</span>
                                 <span class="badge bg-secondary">${event.host || 'Other'}</span>
                             </small>
                         </div>
@@ -723,7 +853,13 @@
                     </div>
                 </div>
                 <div class="row mt-3">
-                    <div class="col-12">
+                    <div class="col-md-6">
+                        <h6>By Source</h6>
+                        ${stats.source_stats ? Object.entries(stats.source_stats).map(([source, count]) => 
+                            `<p><strong>${source}:</strong> ${count}</p>`
+                        ).join('') : '<p>Source statistics not available</p>'}
+                    </div>
+                    <div class="col-md-6">
                         <h6>Top Hosts</h6>
                         <div class="row">
                             ${Object.entries(stats.host_stats).map(([host, count]) => 
@@ -857,31 +993,60 @@
                     <div class="calendar-days">
             `;
             
-            // Add empty cells for days before the first day of the month
-            for (let i = 0; i < firstDayOfMonth; i++) {
-                calendarHTML += '<div class="calendar-day empty"></div>';
-            }
+            // Calculate start date (Sunday of the week containing the first day of the month)
+            const firstDayDate = new Date(currentYear, currentMonth, 1);
+            const startDate = new Date(firstDayDate);
+            startDate.setDate(startDate.getDate() - firstDayDate.getDay());
             
-            // Add days of the month
-            for (let day = 1; day <= daysInMonth; day++) {
-                const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            // Generate 6 weeks (42 days) to match homepage calendar
+            for (let i = 0; i < 42; i++) {
+                const currentDayDate = new Date(startDate);
+                currentDayDate.setDate(startDate.getDate() + i);
+                const isCurrentMonth = currentDayDate.getMonth() === currentMonth;
+                const dateStr = currentDayDate.toISOString().split('T')[0];
                 const dayEvents = eventsByDate[dateStr] || [];
-                const isToday = day === today.getDate() && currentMonth === today.getMonth() && currentYear === today.getFullYear();
+                const isToday = currentDayDate.toDateString() === today.toDateString();
+                
+                const eventsHTML = dayEvents.map(event => {
+                    const costType = event.cost_type || 'Unknown';
+                    let eventClass = 'calendar-event';
+                    
+                    // Add cost type class for styling
+                    if (costType === 'Free') {
+                        eventClass += ' free-event';
+                    } else if (costType === 'Paid') {
+                        eventClass += ' paid-event';
+                    } else {
+                        eventClass += ' unknown-event';
+                    }
+                    
+                    // Add virtual/onsite class
+                    if (event.is_virtual) {
+                        eventClass += ' virtual';
+                    } else {
+                        eventClass += ' onsite';
+                    }
+                    
+                    const title = event.title || 'Untitled Event';
+                    const truncatedTitle = title.length > 25 ? title.substring(0, 25) + '...' : title;
+                    
+                    return `
+                        <div class="${eventClass}" 
+                             title="${title}"
+                             data-event-id="${event.id}"
+                             data-event='${JSON.stringify(event).replace(/'/g, "&apos;")}'
+                             onclick="event.stopPropagation(); showEventDetails(${event.id});">
+                            ${truncatedTitle}
+                        </div>
+                    `;
+                }).join('');
                 
                 calendarHTML += `
-                    <div class="calendar-day ${isToday ? 'today' : ''} ${dayEvents.length > 0 ? 'has-events' : ''}" 
-                         onclick="showDayEvents('${dateStr}', ${JSON.stringify(dayEvents).replace(/"/g, '&quot;')})">
-                        <div class="day-number">${day}</div>
-                        ${dayEvents.length > 0 ? `
-                            <div class="event-indicators">
-                                ${dayEvents.slice(0, 3).map((event, index) => `
-                                    <div class="event-indicator" style="background-color: ${getEventColor(event.cost_type)}" 
-                                         title="${event.title}" 
-                                         onclick="event.stopPropagation(); window.open('${event.url}', '_blank');"></div>
-                                `).join('')}
-                                ${dayEvents.length > 3 ? `<div class="event-indicator more" onclick="event.stopPropagation(); showDayEvents('${dateStr}', ${JSON.stringify(dayEvents).replace(/"/g, '&quot;')})">+${dayEvents.length - 3}</div>` : ''}
-                            </div>
-                        ` : ''}
+                    <div class="calendar-day ${isToday ? 'today' : ''} ${!isCurrentMonth ? 'other-month' : ''} ${dayEvents.length > 0 ? 'has-events' : ''}" 
+                         data-date="${dateStr}"
+                         onclick="handleCalendarDayClick('${dateStr}', event)">
+                        <div class="day-number">${currentDayDate.getDate()}</div>
+                        <div class="calendar-events">${eventsHTML}</div>
                     </div>
                 `;
             }
@@ -913,18 +1078,26 @@
             weekStart.setDate(currentDate.getDate() - currentDate.getDay());
             const today = new Date();
             
+            // Calculate all 7 dates for the week (without mutating weekStart)
+            const weekDates = [];
+            for (let i = 0; i < 7; i++) {
+                const dayDate = new Date(weekStart);
+                dayDate.setDate(weekStart.getDate() + i);
+                weekDates.push(dayDate.toISOString().split('T')[0]);
+            }
+            
             let calendarHTML = `
                 <div class="calendar-grid">
                     <div class="calendar-weekdays">
-                        <div class="calendar-day-header">Sun</div>
-                        <div class="calendar-day-header">Mon</div>
-                        <div class="calendar-day-header">Tue</div>
-                        <div class="calendar-day-header">Wed</div>
-                        <div class="calendar-day-header">Thu</div>
-                        <div class="calendar-day-header">Fri</div>
-                        <div class="calendar-day-header">Sat</div>
+                        <div class="calendar-day-header calendar-week-day-header" data-date="${weekDates[0]}">Sun</div>
+                        <div class="calendar-day-header calendar-week-day-header" data-date="${weekDates[1]}">Mon</div>
+                        <div class="calendar-day-header calendar-week-day-header" data-date="${weekDates[2]}">Tue</div>
+                        <div class="calendar-day-header calendar-week-day-header" data-date="${weekDates[3]}">Wed</div>
+                        <div class="calendar-day-header calendar-week-day-header" data-date="${weekDates[4]}">Thu</div>
+                        <div class="calendar-day-header calendar-week-day-header" data-date="${weekDates[5]}">Fri</div>
+                        <div class="calendar-day-header calendar-week-day-header" data-date="${weekDates[6]}">Sat</div>
                     </div>
-                    <div class="calendar-days">
+                    <div class="calendar-days time-grid-content">
             `;
             
             // Add 7 days of the week
@@ -937,7 +1110,8 @@
                 
                 calendarHTML += `
                     <div class="calendar-day ${isToday ? 'today' : ''} ${dayEvents.length > 0 ? 'has-events' : ''}" 
-                         onclick="showDayEvents('${dateStr}', ${JSON.stringify(dayEvents).replace(/"/g, '&quot;')})">
+                         data-date="${dateStr}"
+                         onclick="handleCalendarDayClick('${dateStr}', event)">
                         <div class="day-number">${dayDate.getDate()}</div>
                         ${dayEvents.length > 0 ? `
                             <div class="event-indicators">
@@ -946,7 +1120,7 @@
                                          title="${event.title}" 
                                          onclick="event.stopPropagation(); window.open('${event.url}', '_blank');"></div>
                                 `).join('')}
-                                ${dayEvents.length > 5 ? `<div class="event-indicator more" onclick="event.stopPropagation(); showDayEvents('${dateStr}', ${JSON.stringify(dayEvents).replace(/"/g, '&quot;')})">+${dayEvents.length - 5}</div>` : ''}
+                                ${dayEvents.length > 5 ? `<div class="event-indicator more" onclick="event.stopPropagation(); handleCalendarDayClick('${dateStr}', event)">+${dayEvents.length - 5}</div>` : ''}
                             </div>
                         ` : ''}
                     </div>
@@ -1022,6 +1196,45 @@
                 case 'Paid': return '#ffc107';
                 default: return '#6c757d';
             }
+        }
+        
+        function handleCalendarDayClick(dateStr, event) {
+            // If clicking on an event indicator (not empty day), show event details
+            if (event.target.classList.contains('event-indicator') && !event.target.classList.contains('more')) {
+                // Event indicator click is handled by its own onclick, just prevent navigation
+                return;
+            }
+            
+            // Get events for this date
+            const dayEvents = filteredEvents.filter(e => e.date === dateStr);
+            
+            // If clicking on "more" indicator, show modal with all events
+            if (event.target.classList.contains('more')) {
+                showDayEvents(dateStr, dayEvents);
+                return;
+            }
+            
+            // Otherwise, navigate based on current view:
+            // - Month view: clicking a day → switch to week view containing that day
+            // - Week view: clicking a day header or empty space → switch to day view
+            // - Day view: clicking does nothing (already showing that day)
+            
+            if (currentView === 'month') {
+                // Switch to week view containing the clicked day
+                currentDate = new Date(dateStr);
+                currentView = 'week';
+                document.querySelectorAll('.calendar-view-btn').forEach(b => b.classList.remove('active'));
+                document.querySelector('.calendar-view-btn[data-view="week"]').classList.add('active');
+                updateCalendar();
+            } else if (currentView === 'week') {
+                // Switch to day view for the clicked day
+                currentDate = new Date(dateStr);
+                currentView = 'day';
+                document.querySelectorAll('.calendar-view-btn').forEach(b => b.classList.remove('active'));
+                document.querySelector('.calendar-view-btn[data-view="day"]').classList.add('active');
+                updateCalendar();
+            }
+            // Day view: no action needed (already showing that day)
         }
         
         function showDayEvents(dateStr, events) {

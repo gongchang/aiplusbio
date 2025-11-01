@@ -58,10 +58,20 @@ class Database:
                 categories TEXT DEFAULT '[]',
                 host TEXT DEFAULT 'Other',
                 cost_type TEXT DEFAULT 'Unknown',
+                source TEXT DEFAULT 'Unknown',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # Add source column if it doesn't exist (for existing databases)
+        cursor.execute('''
+            SELECT COUNT(*) FROM pragma_table_info('computing_events') 
+            WHERE name='source'
+        ''')
+        has_source = cursor.fetchone()[0] == 1
+        if not has_source:
+            cursor.execute('ALTER TABLE computing_events ADD COLUMN source TEXT DEFAULT "Unknown"')
         
         # Create scraping_log table
         cursor.execute('''
@@ -466,7 +476,7 @@ class Database:
                     UPDATE computing_events 
                     SET description = ?, time = ?, location = ?, url = ?, 
                         is_virtual = ?, requires_registration = ?, 
-                        categories = ?, host = ?, cost_type = ?, updated_at = ?
+                        categories = ?, host = ?, cost_type = ?, source = ?, updated_at = ?
                     WHERE id = ?
                 ''', (
                     event.get('description', ''),
@@ -478,6 +488,7 @@ class Database:
                     json.dumps(event.get('categories', [])),
                     event.get('host', 'Other'),
                     event.get('cost_type', 'Unknown'),
+                    event.get('source', 'Unknown'),
                     datetime.now().isoformat(),
                     event_id
                 ))
@@ -488,8 +499,8 @@ class Database:
             cursor.execute('''
                 INSERT INTO computing_events 
                 (title, normalized_title, description, date, time, location, url, source_url, 
-                 is_virtual, requires_registration, categories, host, cost_type, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 is_virtual, requires_registration, categories, host, cost_type, source, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 title,
                 normalized_title,
@@ -504,6 +515,7 @@ class Database:
                 json.dumps(event.get('categories', [])),
                 event.get('host', 'Other'),
                 event.get('cost_type', 'Unknown'),
+                event.get('source', 'Unknown'),
                 datetime.now().isoformat()
             ))
             
@@ -524,9 +536,9 @@ class Database:
         
         cursor.execute('''
             SELECT id, title, description, date, time, location, url, source_url,
-                   is_virtual, requires_registration, categories, host, cost_type, created_at
+                   is_virtual, requires_registration, categories, host, cost_type, source, created_at
             FROM computing_events 
-            WHERE date >= ? AND date <= ?
+            WHERE date >= ? AND date <= ? AND date LIKE '____-__-__'
             ORDER BY date ASC, time ASC
             LIMIT 1000
         ''', (today.isoformat(), future_date.isoformat()))
@@ -547,7 +559,8 @@ class Database:
                 'categories': self._parse_categories(row[10]) if row[10] else [],
                 'host': row[11] or 'Other',
                 'cost_type': row[12] or 'Unknown',
-                'created_at': row[13]
+                'source': row[13] or 'Unknown',
+                'created_at': row[14]
             }
             events.append(event)
         
@@ -571,6 +584,10 @@ class Database:
         cursor.execute('SELECT host, COUNT(*) FROM computing_events GROUP BY host ORDER BY COUNT(*) DESC LIMIT 10')
         host_stats = dict(cursor.fetchall())
         
+        # Events by source
+        cursor.execute('SELECT source, COUNT(*) FROM computing_events GROUP BY source ORDER BY COUNT(*) DESC')
+        source_stats = dict(cursor.fetchall())
+        
         # Events today and this week
         today = datetime.now().date()
         week_start = today - timedelta(days=today.weekday())
@@ -590,7 +607,8 @@ class Database:
             'today_events': today_events,
             'week_events': week_events,
             'cost_type_stats': cost_type_stats,
-            'host_stats': host_stats
+            'host_stats': host_stats,
+            'source_stats': source_stats
         }
 
     def urls_are_similar(self, url1: str, url2: str) -> bool:

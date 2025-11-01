@@ -1,1 +1,7 @@
 https://gdg.community.dev/gdg-cloud-boston/
+https://www.aicamp.ai/event/events
+https://developer.nvidia.com/community
+https://www.microsoft.com/en/events/search-catalog/?filters=product%3Aazure%2Cprimary-language%3Aenglish&scenario=events
+https://github.com/resources/events
+https://events.linuxfoundation.org/
+https://home.mlops.community/public/events?state=upcoming

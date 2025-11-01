@@ -10,6 +10,8 @@ from computing_event_searcher import ComputingEventSearcher
 from enhanced_computing_event_searcher import EnhancedComputingEventSearcher
 from improved_tavily_searcher import ImprovedTavilySearcher
 from free_api_computing_searcher import FreeAPIComputingSearcher
+from enhanced_tech_computing_searcher import EnhancedTechComputingSearcher
+from simple_tech_event_searcher import SimpleTechEventSearcher
 
 app = Flask(__name__)
 CORS(app)
@@ -22,6 +24,8 @@ computing_searcher = ComputingEventSearcher()
 enhanced_computing_searcher = EnhancedComputingEventSearcher()
 improved_tavily_searcher = ImprovedTavilySearcher()
 free_api_searcher = FreeAPIComputingSearcher()
+enhanced_tech_searcher = EnhancedTechComputingSearcher()
+simple_tech_searcher = SimpleTechEventSearcher()
 
 # Cache for virtual worldwide events descriptions
 _virtual_events_cache = {}
@@ -431,15 +435,15 @@ def get_computing_events():
 def search_computing_events():
     """API endpoint to manually trigger computing event search"""
     try:
-        # Use free API searcher for better results (RSS feeds + Eventbrite + Tavily)
-        events = free_api_searcher.search_events(max_results=20)
+        # Use enhanced tech searcher which includes Customized source and API integrations
+        events = enhanced_tech_searcher.search_events(max_results=100)
         
         # Save events to database
-        saved_count = free_api_searcher.save_events_to_database(events)
+        saved_count = enhanced_tech_searcher.save_events_to_database(events)
         
         return jsonify({
             'success': True,
-            'message': f'Successfully searched for computing events using enhanced multi-API search',
+            'message': f'Successfully searched for tech-focused computing events (Boston + Virtual)',
             'events_found': len(events),
             'events_saved': saved_count
         })
