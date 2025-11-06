@@ -144,3 +144,4 @@ New events will automatically get institution based on:
 The main page issues are now completely resolved, and the separation between main page and computing events is guaranteed!
 
 
+

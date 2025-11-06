@@ -125,3 +125,4 @@ institution_mapping = {
 The institution categorization system is now working correctly for both the main page and computing events!
 
 
+
