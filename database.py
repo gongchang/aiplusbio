@@ -29,6 +29,7 @@ class Database:
                 is_virtual BOOLEAN DEFAULT FALSE,
                 requires_registration BOOLEAN DEFAULT FALSE,
                 categories TEXT DEFAULT '[]',
+                institution TEXT DEFAULT 'Others',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -40,6 +41,11 @@ class Database:
         except sqlite3.OperationalError:
             # Column already exists
             pass
+
+        # Add institution column if it doesn't exist
+        cursor.execute("SELECT COUNT(*) FROM pragma_table_info('events') WHERE name='institution'")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute("ALTER TABLE events ADD COLUMN institution TEXT DEFAULT 'Others'")
         
         # Create computing_events table
         cursor.execute('''
