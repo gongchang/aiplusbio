@@ -6,8 +6,6 @@ class EventsApp {
         this.filteredEvents = [];
         this.currentFilters = {
             search: '',
-            cs: false,
-            biology: false,
             mit: true,
             harvard: true,
             bu: true,
@@ -44,17 +42,6 @@ class EventsApp {
         // Search input
         document.getElementById('searchInput').addEventListener('input', async (e) => {
             this.currentFilters.search = e.target.value.toLowerCase();
-            await this.applyFilters();
-        });
-        
-        // Category filters
-        document.getElementById('csFilter').addEventListener('change', async (e) => {
-            this.currentFilters.cs = e.target.checked;
-            await this.applyFilters();
-        });
-        
-        document.getElementById('biologyFilter').addEventListener('change', async (e) => {
-            this.currentFilters.biology = e.target.checked;
             await this.applyFilters();
         });
         
@@ -98,8 +85,6 @@ class EventsApp {
         try {
             const params = new URLSearchParams({
                 search: this.currentFilters.search,
-                cs: this.currentFilters.cs.toString(),
-                biology: this.currentFilters.biology.toString(),
                 mit: this.currentFilters.mit.toString(),
                 harvard: this.currentFilters.harvard.toString(),
                 bu: this.currentFilters.bu.toString(),
@@ -197,13 +182,6 @@ class EventsApp {
             badges.push('<span class="event-badge badge-registration"><i class="fas fa-user-plus me-1"></i>Registration Required</span>');
         }
         
-        // Category badges
-        event.categories.forEach(category => {
-            const icon = category === 'computer science' ? 'fas fa-laptop-code' : 'fas fa-dna';
-            const cssClass = category === 'computer science' ? 'cs' : 'biology';
-            badges.push(`<span class="event-badge badge-category ${cssClass}"><i class="${icon} me-1"></i>${category}</span>`);
-        });
-        
         return `
             <div class="list-group-item event-item" data-event-id="${event.id}">
                 <div class="d-flex justify-content-between align-items-start">
@@ -259,10 +237,6 @@ class EventsApp {
             day: 'numeric' 
         });
         
-        const categories = event.categories.length > 0 
-            ? event.categories.map(cat => `<span class="badge bg-primary me-1">${cat}</span>`).join('')
-            : '<span class="text-muted">No categories assigned</span>';
-        
         document.getElementById('eventModalBody').innerHTML = `
             <div class="event-detail-row">
                 <div class="event-detail-label">Date & Time</div>
@@ -293,11 +267,6 @@ class EventsApp {
                         '<span class="badge bg-success ms-1"><i class="fas fa-check me-1"></i>No Registration Required</span>'
                     }
                 </div>
-            </div>
-            
-            <div class="event-detail-row">
-                <div class="event-detail-label">Categories</div>
-                <div class="event-detail-value">${categories}</div>
             </div>
             
             ${event.description ? `
@@ -599,18 +568,7 @@ class EventsApp {
             if (dayEvents.length > 0) dayClass += ' has-events';
             
             const eventsHTML = dayEvents.map(event => {
-                const categories = event.categories || [];
-                const isCS = categories.some(cat => cat.toLowerCase().includes('computer science'));
-                const isBiology = categories.some(cat => cat.toLowerCase().includes('biology'));
-                
                 let eventClass = 'calendar-event';
-                if (isCS && isBiology) {
-                    eventClass += ' cs-event biology-event';
-                } else if (isCS) {
-                    eventClass += ' cs-event';
-                } else if (isBiology) {
-                    eventClass += ' biology-event';
-                }
                 
                 if (event.is_virtual) {
                     eventClass += ' virtual';
@@ -861,12 +819,7 @@ class EventsApp {
         dayColumns.forEach((events, dayIndex) => {
             const laidOut = this.layoutDayEvents(events);
             laidOut.forEach(p => {
-                const categories = p.ev.categories || [];
-                const isCS = categories.some(cat => cat.toLowerCase().includes('computer science'));
-                const isBiology = categories.some(cat => cat.toLowerCase().includes('biology'));
                 let cls = 'time-event';
-                if (isCS) cls += ' cs-event';
-                if (isBiology) cls += ' biology-event';
                 if (p.ev.is_virtual) cls += ' virtual'; else cls += ' onsite';
                 const dayLeftPct = (dayIndex / 7) * 100;
                 const dayWidthPct = 100 / 7;
@@ -887,12 +840,7 @@ class EventsApp {
         const events = this.getEventsForDate(date);
         const laidOut = this.layoutDayEvents(events);
         return laidOut.map(p => {
-            const categories = p.ev.categories || [];
-            const isCS = categories.some(cat => cat.toLowerCase().includes('computer science'));
-            const isBiology = categories.some(cat => cat.toLowerCase().includes('biology'));
             let cls = 'time-event';
-            if (isCS) cls += ' cs-event';
-            if (isBiology) cls += ' biology-event';
             if (p.ev.is_virtual) cls += ' virtual'; else cls += ' onsite';
             return `
                 <div class="${cls}" style="top:${p.topPct}%; left:${p.leftPct}%; height:${p.heightPct}%; width:${p.widthPct}%" data-event='${JSON.stringify(p.ev).replace(/'/g, "&apos;")}' title='${p.ev.title}'>

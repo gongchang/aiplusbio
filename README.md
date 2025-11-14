@@ -121,6 +121,16 @@ https://another-site.com/calendar
 5. **Refresh**: Click "Refresh Events" to manually trigger scraping
 6. **Statistics**: Click "Stats" to view scraping statistics and activity
 
+### Updating the Virtual Worldwide Page
+
+The Virtual Worldwide page is curated manually from `virtual_worldwide.txt`. When you add, remove, or reorder URLs in that list, run the helper script to regenerate the static HTML cards:
+
+```bash
+python tools/update_virtual_worldwide.py
+```
+
+This script reads every non-comment URL from `virtual_worldwide.txt` and rewrites `templates/virtual_worldwide.html` with a matching set of cards. There’s no runtime dependency—just run the script whenever you change the list, then reload the page.
+
 ### API Endpoints
 
 The application provides several REST API endpoints:
@@ -251,3 +261,13 @@ For issues and questions:
 ---
 
 **Built with ❤️ for the AI+Bio research community** 
+
+### Continuous Integration
+
+A GitHub Actions workflow located at `.github/workflows/ci.yml` runs automatically on every push and pull request to `main`. It installs dependencies from `requirements.txt` and executes the full pytest suite to ensure the application remains stable.
+
+```bash
+# Execute locally to mirror CI
+pip install -r requirements.txt
+pytest
+``` 

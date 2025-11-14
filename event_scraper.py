@@ -26,6 +26,7 @@ class EventScraper:
         # Setup logging
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
+        self.detail_cache = {}
         
         # Load websites to watch
         self.websites = self.load_websites()
@@ -76,6 +77,12 @@ class EventScraper:
                 self.logger.error(f"Error scraping {website}: {str(e)}")
                 self.db.log_scraping(website, 'error', 0, str(e))
         
+        # After scraping, attempt to enrich metadata for existing events that still need details
+        try:
+            self.refresh_event_metadata(days_ahead=180, include_past=False, lookback_days=90, max_events=100)
+        except Exception as e:
+            self.logger.debug(f"Metadata refresh skipped due to error: {e}")
+        
         return all_new_events
     
     def scrape_website(self, url: str) -> List[Dict[str, Any]]:
@@ -97,6 +104,14 @@ class EventScraper:
             else:
                 events = self.scrape_generic_page(response.text, url)
             
+            # Enrich and clean events before saving
+            processed_events = []
+            for raw_event in events:
+                processed = self.post_process_event(raw_event)
+                if processed:
+                    processed_events.append(processed)
+            events = processed_events
+
             # Add events to database
             new_events = []
             for event in events:
@@ -264,6 +279,9 @@ class EventScraper:
     def extract_event_from_element(self, element, source_url: str, soup: BeautifulSoup = None) -> Dict[str, Any]:
         """Extract event information from a DOM element with improved logic"""
         try:
+            if self.is_placeholder_element(element):
+                return None
+            
             # Extract title with better logic
             title = self.extract_better_title(element)
             
@@ -1163,6 +1181,7 @@ class EventScraper:
                     time_str = date_obj.strftime('%I:%M %p')
                 except:
                     pass
+            time_str = self.normalize_time_string(time_str)
             
             event = {
                 'title': title,
@@ -1180,3 +1199,613 @@ class EventScraper:
             return event
         except:
             return None 
+
+    def is_placeholder_element(self, element) -> bool:
+        """Detect navigation/search widgets that should not be treated as events."""
+        if not element:
+            return True
+        
+        tag_name = getattr(element, 'name', '').lower()
+        if tag_name in {'nav', 'form', 'header', 'footer', 'aside'}:
+            return True
+
+        classes = []
+        if element.has_attr('class'):
+            classes = [cls.lower() for cls in element.get('class', [])]
+        class_string = ' '.join(classes)
+        placeholder_class_patterns = [
+            'tribe-events-nav',
+            'tribe-events-bar',
+            'views-navigation',
+            'events-search',
+            'events-bar',
+            'events-calendar-list',
+            'calendar-nav',
+            'calendar-pagination',
+            'wp-block-calendar',
+            'event-search',
+            'event-filter'
+        ]
+        if any(pattern in class_string for pattern in placeholder_class_patterns):
+            return True
+
+        text = self.clean_text(element.get_text() or '').lower()
+        placeholder_text_patterns = [
+            'views navigation',
+            'events search',
+            'search events',
+            'find events',
+            'events navigation',
+            'no events found',
+            'thanksgiving day',
+            'tbd',
+            'to be determined'
+        ]
+        if text and len(text) < 80:
+            if any(pattern in text for pattern in placeholder_text_patterns):
+                return True
+        if text and text in {'events', 'event', 'calendar', 'news & events'}:
+            return True
+
+        # Detect if element mainly contains form controls
+        form_controls = element.find_all(['input', 'select', 'button'])
+        if form_controls and len(form_controls) >= 2:
+            return True
+
+        return False
+
+    def post_process_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize and enrich an event after initial extraction."""
+        if not event:
+            return None
+        # Work on a shallow copy to avoid mutating the original reference
+        processed = dict(event)
+        try:
+            processed = self.enrich_event_details(processed)
+            processed = self.normalize_event_fields(processed)
+        except Exception as e:
+            self.logger.debug(f"Post-processing error for {processed.get('url', processed.get('source_url', 'unknown'))}: {e}")
+        return processed
+
+    def normalize_event_fields(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply consistent formatting and fallbacks to core event fields."""
+        event['title'] = self.clean_text(event.get('title', ''))
+        original_description = event.get('description', '')
+        if self.is_generic_title(event['title']):
+            title_from_desc = self.extract_title_from_description(original_description)
+            if title_from_desc and not self.is_generic_title(title_from_desc):
+                event['title'] = title_from_desc
+        if self.is_generic_title(event['title']):
+            title_from_url = self.derive_title_from_url(event.get('url') or event.get('source_url', ''))
+            if title_from_url and not self.is_generic_title(title_from_url):
+                event['title'] = title_from_url
+        if self.is_generic_title(event['title']):
+            fallback_description = self.clean_text(original_description)
+            if fallback_description:
+                event['title'] = fallback_description
+        if self.is_generic_title(event['title']):
+            domain_title = self.derive_title_from_domain(
+                event.get('url') or event.get('source_url', ''),
+                event.get('date', '')
+            )
+            if domain_title:
+                event['title'] = domain_title
+        raw_description = event.get('description', '')
+        event['description'] = self.clean_text(raw_description, collapse_spaces=False)
+        if len(event['description']) > 800:
+            truncated = event['description'][:800].rsplit(' ', 1)[0]
+            event['description'] = f"{truncated}..."
+        if not event['description']:
+            event['description'] = "Full details are available on the event page."
+
+        event['time'] = self.normalize_time_string(event.get('time', ''))
+        if not event['time']:
+            event['time'] = 'Time TBD'
+
+        event['location'] = self.clean_text(event.get('location', ''))
+        event['url'] = event.get('url') or event.get('source_url', '')
+
+        # Update virtual/registration flags using enriched description
+        description_text = event.get('description', '')
+        if description_text:
+            event['is_virtual'] = event.get('is_virtual', False) or self.detect_virtual_event(description_text)
+            event['requires_registration'] = event.get('requires_registration', False) or self.detect_registration_required(description_text)
+
+        # Ensure categories is always a list
+        categories = event.get('categories', [])
+        if isinstance(categories, str):
+            categories = [categories]
+        event['categories'] = categories
+        return event
+
+    def enrich_event_details(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Fetch event detail page when necessary to fill missing metadata."""
+        if not self.needs_detail_enrichment(event):
+            return event
+
+        detail_url = event.get('url') or event.get('source_url')
+        detail = self.fetch_detail_page(detail_url)
+        if not detail:
+            return event
+
+        soup = detail['soup']
+        text_content = detail['text']
+
+        # Prefer structured data when present
+        metadata = self.extract_event_metadata_from_jsonld(soup)
+        if metadata:
+            if self.is_generic_title(event.get('title', '')):
+                meta_title = metadata.get('name') or metadata.get('headline')
+                if meta_title and not self.is_generic_title(meta_title):
+                    event['title'] = meta_title
+
+            if self.is_time_missing(event.get('time', '')):
+                start_value = metadata.get('startDate') or metadata.get('startTime')
+                if start_value:
+                    try:
+                        dt = datetime.fromisoformat(start_value.replace('Z', '+00:00'))
+                        event['time'] = dt.strftime('%I:%M %p')
+                    except Exception:
+                        pass
+
+            if not event.get('description') or len(event['description'].strip()) < 40:
+                meta_desc = metadata.get('description') or metadata.get('summary')
+                if meta_desc:
+                    event['description'] = meta_desc
+
+            if not event.get('location'):
+                location = metadata.get('location')
+                if isinstance(location, dict):
+                    event['location'] = location.get('name') or location.get('address', '')
+                elif isinstance(location, str):
+                    event['location'] = location
+
+        detail_title = self.extract_title_from_detail(soup)
+        if detail_title and not self.is_generic_title(detail_title):
+            event['title'] = detail_title
+        elif self.is_generic_title(event.get('title', '')):
+            url_title = self.derive_title_from_url(event.get('url') or event.get('source_url', ''))
+            if url_title and not self.is_generic_title(url_title):
+                event['title'] = url_title
+            else:
+                desc_title = self.extract_title_from_description(event.get('description', ''))
+                if desc_title and not self.is_generic_title(desc_title):
+                    event['title'] = desc_title
+
+        if not event.get('description') or len(event['description'].strip()) < 40:
+            detail_description = self.extract_description_from_detail(soup)
+            if not detail_description:
+                detail_description = self.extract_description_from_text(text_content)
+            if detail_description:
+                event['description'] = detail_description
+
+        if self.is_time_missing(event.get('time', '')):
+            detail_time = self.extract_time_from_element(soup, soup) or self.extract_time_from_text(text_content)
+            if detail_time:
+                event['time'] = detail_time
+
+        if not event.get('location'):
+            detail_location = self.extract_location_from_detail(soup)
+            if detail_location:
+                event['location'] = detail_location
+
+        # Re-evaluate flags with richer text
+        if text_content:
+            event['is_virtual'] = event.get('is_virtual', False) or self.detect_virtual_event(text_content)
+            event['requires_registration'] = event.get('requires_registration', False) or self.detect_registration_required(text_content)
+
+        return event
+
+    def needs_detail_enrichment(self, event: Dict[str, Any]) -> bool:
+        """Determine whether the event needs extra scraping."""
+        title = event.get('title', '')
+        description = event.get('description', '')
+        time_value = event.get('time', '')
+
+        has_generic_title = self.is_generic_title(title)
+        description_short = len(description.strip()) < 40 or description.strip() == "Full details are available on the event page."
+        missing_time = self.is_time_missing(time_value)
+        url = event.get('url') or event.get('source_url')
+        return bool(url and url.startswith('http') and (has_generic_title or description_short or missing_time))
+
+    def is_time_missing(self, time_value: str) -> bool:
+        if not time_value:
+            return True
+        lowered = time_value.strip().lower()
+        if lowered in ('tbd', 'time tbd', 'tba', 'time tba', 'to be determined'):
+            return True
+        if lowered in ('', '00:00', '0:00', '12:00 am'):
+            return True
+        return False
+
+    def fetch_detail_page(self, url: str) -> Dict[str, Any]:
+        """Retrieve and cache the event detail page."""
+        if not url or not url.startswith('http'):
+            return None
+
+        if url in self.detail_cache:
+            return self.detail_cache[url]
+
+        try:
+            response = self.session.get(url, timeout=20)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            detail = {
+                'soup': soup,
+                'text': soup.get_text(separator=' ', strip=True)
+            }
+            self.detail_cache[url] = detail
+            return detail
+        except Exception as e:
+            self.logger.debug(f"Failed to fetch detail page {url}: {e}")
+            self.detail_cache[url] = None
+            return None
+
+    def extract_event_metadata_from_jsonld(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        """Return first Event object from JSON-LD if available."""
+        if not soup:
+            return None
+        for script in soup.find_all('script', type='application/ld+json'):
+            raw = script.string
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw)
+            except Exception:
+                continue
+            candidates = data if isinstance(data, list) else [data]
+            for obj in candidates:
+                if not isinstance(obj, dict):
+                    continue
+                if obj.get('@type') == 'Event':
+                    return obj
+                # Handle graph collections
+                graph = obj.get('@graph')
+                if isinstance(graph, list):
+                    for item in graph:
+                        if isinstance(item, dict) and item.get('@type') == 'Event':
+                            return item
+        return None
+
+    def extract_title_from_detail(self, soup: BeautifulSoup) -> str:
+        """Extract a descriptive title from the detail page."""
+        if not soup:
+            return ''
+        meta_selectors = [
+            ('property', 'og:title'),
+            ('name', 'twitter:title')
+        ]
+        for attr, value in meta_selectors:
+            tag = soup.find('meta', attrs={attr: value})
+            if tag and tag.get('content'):
+                title = self.clean_text(tag['content'])
+                if title:
+                    return title
+
+        header = soup.find(['h1', 'h2'])
+        if header:
+            title = self.clean_text(header.get_text())
+            if title:
+                return title
+
+        if soup.title and soup.title.string:
+            title = self.clean_text(soup.title.string)
+            if title:
+                return title
+
+        return ''
+
+    def extract_description_from_detail(self, soup: BeautifulSoup) -> str:
+        """Extract a meaningful description from the detail page."""
+        if not soup:
+            return ''
+        meta_selectors = [
+            ('property', 'og:description'),
+            ('name', 'description'),
+            ('name', 'twitter:description')
+        ]
+        for attr, value in meta_selectors:
+            tag = soup.find('meta', attrs={attr: value})
+            if tag and tag.get('content'):
+                description = self.clean_text(tag['content'], collapse_spaces=False)
+                if description:
+                    return description
+
+        article = soup.find('article')
+        if article:
+            paragraphs = article.find_all(['p', 'div'])
+            texts = [self.clean_text(p.get_text(), collapse_spaces=False) for p in paragraphs if self.clean_text(p.get_text())]
+            combined = ' '.join(t for t in texts if t)
+            if combined:
+                return combined
+
+        paragraphs = soup.find_all('p')
+        collected = []
+        for paragraph in paragraphs:
+            text = self.clean_text(paragraph.get_text(), collapse_spaces=False)
+            if len(text) >= 40:
+                collected.append(text)
+            if len(' '.join(collected)) > 320:
+                break
+        if collected:
+            return ' '.join(collected)
+
+        return ''
+
+    def extract_description_from_text(self, text: str) -> str:
+        """Fallback description extraction using raw text."""
+        if not text:
+            return ''
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        collected = []
+        for sentence in sentences:
+            cleaned = self.clean_text(sentence)
+            if len(cleaned) >= 40:
+                collected.append(cleaned)
+            if len(' '.join(collected)) >= 280:
+                break
+        return ' '.join(collected)
+
+    def extract_location_from_detail(self, soup: BeautifulSoup) -> str:
+        """Extract location information from the detail page."""
+        if not soup:
+            return ''
+        meta_location = soup.find('meta', attrs={'property': 'event:location'})
+        if meta_location and meta_location.get('content'):
+            return self.clean_text(meta_location.get('content'))
+
+        location = self.extract_location(soup)
+        if location:
+            return self.clean_text(location)
+
+        # Look for address microdata
+        address = soup.find(attrs={'itemprop': 'location'})
+        if address:
+            return self.clean_text(address.get_text())
+
+        return ''
+
+    def normalize_time_string(self, time_str: str) -> str:
+        """Normalize different time formats into a canonical 12-hour format."""
+        if not time_str:
+            return ''
+        t = time_str.strip()
+        if not t:
+            return ''
+
+        lowered = t.lower()
+        if any(keyword in lowered for keyword in ['tbd', 'to be determined', 'tba']):
+            return 'Time TBD'
+        if 'all day' in lowered:
+            return 'All Day'
+
+        # Handle "1pm", "1 pm", "1:30 pm"
+        match = re.match(r'^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$', lowered)
+        if match:
+            hour = int(match.group(1))
+            minute = int(match.group(2) or '0')
+            ampm = match.group(3).upper()
+            if hour == 0:
+                hour = 12
+                ampm = 'AM'
+            elif hour > 12:
+                hour = hour - 12
+            return f"{hour}:{minute:02d} {ampm}"
+
+        # Handle "13:00" 24-hour format
+        match = re.match(r'^(\d{1,2}):(\d{2})$', lowered)
+        if match:
+            hour24 = int(match.group(1))
+            minute = int(match.group(2))
+            if 0 <= hour24 <= 23:
+                if hour24 == 0:
+                    return f"12:{minute:02d} AM"
+                if hour24 == 12:
+                    return f"12:{minute:02d} PM"
+                if hour24 > 12:
+                    return f"{hour24 - 12}:{minute:02d} PM"
+                return f"{hour24}:{minute:02d} AM"
+
+        # Handle compact "12:00pm" format
+        match = re.match(r'^(\d{1,2}):(\d{2})(am|pm)$', lowered)
+        if match:
+            hour = int(match.group(1))
+            minute = int(match.group(2))
+            ampm = match.group(3).upper()
+            if hour == 0:
+                hour = 12
+                ampm = 'AM'
+            elif hour > 12:
+                hour -= 12
+            return f"{hour}:{minute:02d} {ampm}"
+
+        # As a fallback, reuse text time extraction
+        extracted = self.extract_time_from_text(t)
+        if extracted:
+            return extracted
+
+        return t
+
+    def clean_text(self, text: str, collapse_spaces: bool = True) -> str:
+        """Normalize whitespace and strip surrounding spaces."""
+        if not text:
+            return ''
+        if collapse_spaces:
+            return re.sub(r'\s+', ' ', text).strip()
+
+        # Keep intentional paragraph breaks while normalizing spacing
+        normalized = text.replace('\r\n', '\n')
+        normalized = re.sub(r'\n{3,}', '\n\n', normalized)
+        normalized = re.sub(r'[ \t]+', ' ', normalized)
+        lines = [line.strip() for line in normalized.split('\n')]
+        return '\n'.join([line for line in lines if line]).strip()
+
+    def is_generic_title(self, title: str) -> bool:
+        """Identify placeholder or non-descriptive titles."""
+        if not title:
+            return True
+        cleaned = self.clean_text(title).lower()
+        generic_titles = {
+            'event',
+            'events',
+            'calendar of events',
+            'calendar',
+            'upcoming events',
+            'view event',
+            'event details',
+            'learn more',
+            'read more',
+            'news & events',
+            'views navigation',
+            'events search',
+            'thanksgiving day',
+            'tbd',
+            'to be determined',
+            'ai + biology event',
+            'ai + biology events',
+            'mit ai + biology event',
+            'mit ai + biology events'
+        }
+        if cleaned in generic_titles:
+            return True
+        generic_prefixes = [
+            'ai + biology event',
+            'ai + biology events',
+            'mit ai + biology event',
+            'mit ai + biology events',
+            'bu ai + biology event',
+            'bu ai + biology events'
+        ]
+        if any(cleaned.startswith(prefix) for prefix in generic_prefixes):
+            return True
+        return False
+
+    def extract_title_from_description(self, description: str) -> str:
+        """Try to derive a meaningful title from the description text."""
+        if not description:
+            return ''
+        sentences = re.split(r'(?<=[.!?])\s+', description.strip())
+        for sentence in sentences:
+            candidate = self.clean_text(sentence)
+            if 10 < len(candidate) <= 140 and not self.is_generic_title(candidate):
+                return candidate
+        return ''
+
+    def derive_title_from_url(self, url: str) -> str:
+        """Construct a title candidate from the event URL path."""
+        if not url:
+            return ''
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            return ''
+        segments = [seg for seg in parsed.path.split('/') if seg]
+        for segment in reversed(segments):
+            if segment.isdigit():
+                continue
+            cleaned = re.sub(r'[-_]+', ' ', segment)
+            cleaned = re.sub(r'\.[a-z0-9]+$', '', cleaned, flags=re.IGNORECASE)
+            cleaned = self.clean_text(cleaned)
+            if not cleaned or len(cleaned) < 3:
+                continue
+            candidate = cleaned.title()
+            if not self.is_generic_title(candidate):
+                return candidate
+        return ''
+
+    def derive_title_from_domain(self, url: str, date_str: str) -> str:
+        """Fallback title combining source domain/path and event date."""
+        if not url:
+            return ''
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            return ''
+
+        host = parsed.hostname or ''
+        host_parts = [part for part in host.split('.') if part and part not in {'www', 'com', 'org', 'net', 'edu'}]
+
+        path_parts = [seg for seg in parsed.path.split('/') if seg]
+        filtered_path = []
+        skip_tokens = {'events', 'event', 'calendar', 'calendars', 'calendar_event', 'view', 'views', 'news'}
+        for seg in path_parts:
+            if seg.lower() in skip_tokens:
+                continue
+            filtered_path.append(seg)
+
+        components = host_parts[:2]
+        if filtered_path:
+            components.append(filtered_path[0])
+
+        if not components:
+            components = [host or 'Event']
+
+        base = ' '.join(self.clean_text(comp).title() for comp in components if comp)
+        if not base:
+            base = 'Event'
+
+        title = f"{base} Calendar"
+        if date_str:
+            try:
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                title = f"{title} ({date_obj.strftime('%b %d, %Y')})"
+            except ValueError:
+                pass
+
+        if self.is_generic_title(title):
+            return ''
+        return title
+
+    def refresh_event_metadata(
+        self,
+        days_ahead: int = 180,
+        include_past: bool = False,
+        lookback_days: int = 365,
+        max_events: int = 200
+    ) -> int:
+        """Re-process stored events that are missing key metadata."""
+        events = self.db.get_events(
+            days_ahead=days_ahead,
+            include_past=include_past,
+            lookback_days=lookback_days,
+            limit=5000 if not max_events else max(max_events * 2, 1000)
+        )
+        updated = 0
+        processed = 0
+
+        for event in events:
+            if max_events and processed >= max_events:
+                break
+
+            if not self.needs_detail_enrichment(event):
+                continue
+
+            enriched = self.post_process_event(event)
+            if not enriched:
+                continue
+
+            processed += 1
+            if self.event_metadata_changed(event, enriched):
+                enriched['id'] = event['id']
+                self.db.update_event_metadata(enriched)
+                updated += 1
+
+        if updated:
+            self.logger.info(f"Enriched metadata for {updated} stored events")
+        return updated
+
+    def event_metadata_changed(self, original: Dict[str, Any], enriched: Dict[str, Any]) -> bool:
+        """Check if enrichment materially updated the event."""
+        text_fields = ['title', 'description', 'time', 'location', 'url']
+        for field in text_fields:
+            orig_value = self.clean_text(str(original.get(field, '')))
+            new_value = self.clean_text(str(enriched.get(field, '')))
+            if orig_value != new_value:
+                return True
+
+        bool_fields = ['is_virtual', 'requires_registration']
+        for field in bool_fields:
+            if bool(original.get(field, False)) != bool(enriched.get(field, False)):
+                return True
+
+        return False

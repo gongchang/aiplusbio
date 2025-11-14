@@ -295,9 +295,6 @@ def get_events():
     try:
         # Get filter parameters
         search_query = request.args.get('search', '').lower()
-        cs_filter = request.args.get('cs', 'false').lower() == 'true'
-        biology_filter = request.args.get('biology', 'false').lower() == 'true'
-        
         # Get institution filters
         mit_filter = request.args.get('mit', 'true').lower() == 'true'
         harvard_filter = request.args.get('harvard', 'true').lower() == 'true'
@@ -316,12 +313,6 @@ def get_events():
                 searchable_text = f"{event.get('title', '')} {event.get('description', '')} {event.get('location', '')}".lower()
                 if search_query not in searchable_text:
                     continue
-            
-            # Category filters
-            if cs_filter and 'computer science' not in event.get('categories', []):
-                continue
-            if biology_filter and 'biology' not in event.get('categories', []):
-                continue
             
             # Institution filters
             event_institution = event.get('institution', 'Others')
@@ -596,12 +587,12 @@ def get_virtual_worldwide():
                             'description': description
                         })
 
-                    # Conference websites (general)
+                    # Seminar hubs (general)
                     elif any(keyword in domain for keyword in ['conference', 'symposium', 'meeting', 'congress']):
                         virtual_events.append({
-                            'type': 'conference',
+                            'type': 'seminar',
                             'url': url,
-                            'title': f'Conference - {domain}',
+                            'title': f'Virtual Seminar Hub - {domain}',
                             'description': description
                         })
 
@@ -617,9 +608,9 @@ def get_virtual_worldwide():
                     # Default for unknown sites
                     else:
                         virtual_events.append({
-                            'type': 'other',
+                            'type': 'seminar',
                             'url': url,
-                            'title': f'Virtual Event - {domain}',
+                            'title': f'Virtual Seminar - {domain}',
                             'description': description
                         })
             except FileNotFoundError:
@@ -717,12 +708,12 @@ def get_virtual_worldwide():
                             'description': description
                         })
 
-                    # Conference websites (general)
+                    # Seminar hubs (general)
                     elif any(keyword in domain for keyword in ['conference', 'symposium', 'meeting', 'congress']):
                         virtual_events.append({
-                            'type': 'conference',
+                            'type': 'seminar',
                             'url': url,
-                            'title': f'Conference - {domain}',
+                            'title': f'Virtual Seminar Hub - {domain}',
                             'description': description
                         })
 
@@ -738,9 +729,9 @@ def get_virtual_worldwide():
                     # Default for unknown sites
                     else:
                         virtual_events.append({
-                            'type': 'other',
+                            'type': 'seminar',
                             'url': url,
-                            'title': f'Virtual Event - {domain}',
+                            'title': f'Virtual Seminar - {domain}',
                             'description': description
                         })
             except FileNotFoundError:

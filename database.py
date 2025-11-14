@@ -293,24 +293,34 @@ class Database:
         
         return ' '.join(words)
     
-    def get_events(self, days_ahead: int = 365) -> List[Dict[str, Any]]:
-        """Get all events from today onwards with optimized query"""
+    def get_events(
+        self,
+        days_ahead: int = 365,
+        include_past: bool = False,
+        lookback_days: int = 365,
+        limit: int = 1000
+    ) -> List[Dict[str, Any]]:
+        """Get events in a configurable date window with optimized query"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         # Calculate date range
         today = datetime.now().date()
         future_date = today + timedelta(days=days_ahead)
+        if include_past:
+            start_date = today - timedelta(days=lookback_days)
+        else:
+            start_date = today
         
         # Optimized query with indexing hints
         cursor.execute('''
             SELECT id, title, description, date, time, location, url, source_url,
                    is_virtual, requires_registration, categories, institution, created_at
-            FROM events 
+            FROM events
             WHERE date >= ? AND date <= ?
             ORDER BY date ASC, time ASC
-            LIMIT 1000
-        ''', (today.isoformat(), future_date.isoformat()))
+            LIMIT ?
+        ''', (start_date.isoformat(), future_date.isoformat(), limit))
         
         events = []
         for row in cursor.fetchall():
@@ -380,6 +390,68 @@ class Database:
         
         conn.commit()
         conn.close()
+    
+    def update_event_metadata(self, event: Dict[str, Any]):
+        """Update core metadata for an existing event."""
+        if not event or 'id' not in event:
+            return
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            event_id = event['id']
+            title = event.get('title', '').strip()
+            normalized_title = self.normalize_title(title)
+            description = event.get('description', '')
+            date = event.get('date', '')
+            time = event.get('time', '')
+            location = event.get('location', '')
+            url = event.get('url', '')
+            source_url = event.get('source_url', '')
+            is_virtual = bool(event.get('is_virtual', False))
+            requires_registration = bool(event.get('requires_registration', False))
+            categories = json.dumps(event.get('categories', []))
+            institution = event.get('institution') or self.get_institution_from_url(source_url)
+
+            # Skip update if another row already occupies the unique slot
+            cursor.execute('''
+                SELECT id FROM events
+                WHERE title = ? AND date = ? AND IFNULL(time, '') = IFNULL(?, '')
+                  AND IFNULL(location, '') = IFNULL(?, '') AND id != ?
+                LIMIT 1
+            ''', (title, date, time, location, event_id))
+            duplicate = cursor.fetchone()
+            if duplicate:
+                conn.rollback()
+                return
+            
+            cursor.execute('''
+                UPDATE events
+                SET title = ?, normalized_title = ?, description = ?, date = ?, time = ?, 
+                    location = ?, url = ?, source_url = ?, is_virtual = ?, 
+                    requires_registration = ?, categories = ?, institution = ?, updated_at = ?
+                WHERE id = ?
+            ''', (
+                title,
+                normalized_title,
+                description,
+                date,
+                time,
+                location,
+                url,
+                source_url,
+                is_virtual,
+                requires_registration,
+                categories,
+                institution,
+                datetime.now().isoformat(),
+                event_id
+            ))
+            
+            conn.commit()
+        finally:
+            conn.close()
     
     def log_scraping(self, source_url: str, status: str, events_found: int = 0, error_message: str = None):
         """Log scraping activity"""
