@@ -13,4 +13,5 @@ feedparser==6.0.10
 selenium==4.15.2
 webdriver-manager==4.0.1 
 pytest==8.4.2
-pytest-asyncio==1.2.0 
+pytest-asyncio==1.2.0
+google-cloud-firestore==2.16.0 

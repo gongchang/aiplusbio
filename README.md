@@ -79,24 +79,32 @@ The application features a clean, modern interface with:
 
 ### Environment Variables
 
-Create a `.env` file in the project root with the following variables:
+Create a `.env` file in the project root with the following variables. When you
+deploy, convert the same keys into Cloud Run / Cloud Functions environment
+variables or secrets.
 
 ```env
-# OpenAI API Configuration (optional)
-OPENAI_API_KEY=your_openai_api_key_here
-
-# Flask Configuration
+# Core app configuration
 FLASK_ENV=development
 FLASK_DEBUG=True
+USE_FIRESTORE=false          # Set to true in Cloud Run / Functions
+GOOGLE_CLOUD_PROJECT=your-gcp-project-id
 
-# Database Configuration
+# External APIs used by the scrapers
+OPENAI_API_KEY=your-openai-api-key
+TAVILY_API_KEY=your-tavily-api-key
+Tavily_API=your-tavily-api-key   # Legacy alias used by older scripts
+EVENTBRITE_API_KEY=your-eventbrite-api-key
+LUMA_API_KEY=your-luma-api-key
+
+# Local database fallback (set to /tmp/events.db in serverless environments)
 DATABASE_PATH=events.db
 
-# Scraping Configuration
+# Scraping behaviour
 SCRAPING_INTERVAL_HOURS=6
 REQUEST_TIMEOUT=30
 
-# Logging Configuration
+# Logging
 LOG_LEVEL=INFO
 ```
 
@@ -271,3 +279,189 @@ A GitHub Actions workflow located at `.github/workflows/ci.yml` runs automatical
 pip install -r requirements.txt
 pytest
 ``` 
+
+## Deploying on Google Cloud
+
+### Overview
+- **Cloud Run** hosts the Flask web UI (scales to zero, covered by the free tier).
+- **Cloud Functions** runs the scraper on-demand.
+- **Cloud Scheduler** triggers the scraper every 12 hours.
+- **Firestore (Native mode)** stores event documents for both the web app and scraper.
+
+### 1. Project bootstrap
+```bash
+gcloud auth login
+gcloud config set project <PROJECT_ID>
+gcloud services enable run.googleapis.com \
+  cloudfunctions.googleapis.com \
+  cloudscheduler.googleapis.com \
+  firestore.googleapis.com \
+  artifactregistry.googleapis.com \
+  secretmanager.googleapis.com
+```
+
+### 2. Firestore (Native mode)
+```bash
+gcloud firestore databases create \
+  --location=us-central1 \
+  --type=firestore-native
+```
+
+### 3. Manage secrets
+Store API keys in Secret Manager (recommended) or export them in the shell.
+```bash
+printf '%s' "$OPENAI_API_KEY"      | gcloud secrets create OPENAI_API_KEY --data-file=- --replication-policy=automatic
+printf '%s' "$TAVILY_API_KEY"      | gcloud secrets create TAVILY_API_KEY --data-file=- --replication-policy=automatic
+printf '%s' "$EVENTBRITE_API_KEY"  | gcloud secrets create EVENTBRITE_API_KEY --data-file=- --replication-policy=automatic
+printf '%s' "$LUMA_API_KEY"        | gcloud secrets create LUMA_API_KEY --data-file=- --replication-policy=automatic
+```
+
+### 4. Build & deploy Cloud Run (web app)
+```bash
+export PROJECT_ID=<PROJECT_ID>
+gcloud builds submit --tag gcr.io/$PROJECT_ID/aiplusbio-web
+gcloud run deploy aiplusbio-web \
+  --image gcr.io/$PROJECT_ID/aiplusbio-web \
+  --region=us-central1 \
+  --allow-unauthenticated \
+  --memory=512Mi --cpu=1 \
+  --concurrency=10 \
+  --min-instances=0 --max-instances=1 \
+  --set-env-vars USE_FIRESTORE=true,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,DATABASE_PATH=/tmp/events.db \
+  --update-secrets \
+      TAVILY_API_KEY=TAVILY_API_KEY:latest,\
+      Tavily_API=TAVILY_API_KEY:latest,\
+      EVENTBRITE_API_KEY=EVENTBRITE_API_KEY:latest,\
+      LUMA_API_KEY=LUMA_API_KEY:latest,\
+      OPENAI_API_KEY=OPENAI_API_KEY:latest
+```
+
+### 5. Deploy the scraper as a 2nd gen Cloud Function
+`main.py` in the repo root exposes the required `scrape_http` entrypoint.
+```bash
+gcloud functions deploy scrape-http \
+  --region=us-central1 \
+  --runtime python312 \
+  --trigger-http \
+  --memory=256MB \
+  --timeout=120s \
+  --max-instances=1 \
+  --entry-point scrape_http \
+  --source=. \
+  --set-env-vars USE_FIRESTORE=true,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,DATABASE_PATH=/tmp/events.db \
+  --update-secrets \
+      TAVILY_API_KEY=TAVILY_API_KEY:latest,\
+      Tavily_API=TAVILY_API_KEY:latest,\
+      EVENTBRITE_API_KEY=EVENTBRITE_API_KEY:latest,\
+      LUMA_API_KEY=LUMA_API_KEY:latest,\
+      OPENAI_API_KEY=OPENAI_API_KEY:latest
+```
+
+### 6. Schedule the scraper every 12 hours
+```bash
+gcloud iam service-accounts create scraper-scheduler
+
+gcloud scheduler jobs create http scrape-events \
+  --location=us-central1 \
+  --schedule="0 */12 * * *" \
+  --uri=https://us-central1-$PROJECT_ID.cloudfunctions.net/scrape-http \
+  --http-method=POST \
+  --oidc-service-account-email=scraper-scheduler@$PROJECT_ID.iam.gserviceaccount.com
+```
+Grant the scheduler service account `roles/cloudfunctions.invoker` and ensure
+the Cloud Function’s runtime service account has `roles/datastore.user` and
+`roles/logging.logWriter`.
+
+### 7. Stay inside the free tier
+- Use the smallest instance sizes shown above.
+- Monitor Cloud Run, Cloud Functions, and Firestore usage in Cloud Monitoring.
+- Call `EventStore.prune_older_than(days=90)` periodically to keep Firestore
+  storage below 1 GB.
+### 8. Testing the Google Cloud Deployment
+
+#### Get Your Service URLs
+```bash
+# Get Cloud Run web app URL
+gcloud run services describe aiplusbio-web --region=us-central1 --format='value(status.url)'
+
+# Get Cloud Function scraper URL
+gcloud functions describe scrape-http --region=us-central1 --format='value(httpsTrigger.url)'
+```
+
+#### Test the Cloud Function Scraper
+Manually trigger the scraper to populate Firestore:
+```bash
+# Replace FUNCTION_URL with the URL from above
+curl -X POST https://us-central1-$PROJECT_ID.cloudfunctions.net/scrape-http
+
+# Or use gcloud to invoke it
+gcloud functions call scrape-http --region=us-central1
+```
+
+Check the function logs to see if it ran successfully:
+```bash
+gcloud functions logs read scrape-http --region=us-central1 --limit=50
+```
+
+#### Test the Cloud Run Web App
+1. **Get the service URL** (from step above or Cloud Console)
+2. **Visit the homepage** in your browser: `https://your-service-url.run.app`
+3. **Test the API endpoint**:
+   ```bash
+   curl https://your-service-url.run.app/api/events
+   ```
+4. **Check if events are loading**: The page should display events if the scraper has run and populated Firestore.
+
+#### Verify Firestore Data
+```bash
+# List events in Firestore (requires gcloud CLI)
+gcloud firestore export gs://$PROJECT_ID-backup/events-export
+
+# Or use the Cloud Console:
+# Navigate to Firestore → Data → events collection
+```
+
+#### Common Issues and Debugging
+
+**No events showing on the website:**
+1. Check if the scraper has run: `gcloud functions logs read scrape-http --region=us-central1`
+2. Verify Firestore has data: Check the Firestore console in Cloud Console
+3. Check Cloud Run logs: `gcloud run services logs read aiplusbio-web --region=us-central1`
+4. Ensure `USE_FIRESTORE=true` is set on both Cloud Run and Cloud Functions
+
+**Scraper not running:**
+1. Check Cloud Scheduler job status: `gcloud scheduler jobs describe scrape-events --location=us-central1`
+2. Manually trigger the function to test: `gcloud functions call scrape-http --region=us-central1`
+3. Review function logs for errors: `gcloud functions logs read scrape-http --region=us-central1 --limit=100`
+
+**Permission errors:**
+1. Ensure service accounts have required roles:
+   ```bash
+   # Cloud Function needs Firestore access
+   gcloud projects add-iam-policy-binding $PROJECT_ID \
+     --member="serviceAccount:$PROJECT_ID-compute@developer.gserviceaccount.com" \
+     --role="roles/datastore.user"
+   
+   # Cloud Run needs Firestore access
+   gcloud projects add-iam-policy-binding $PROJECT_ID \
+     --member="serviceAccount:$PROJECT_ID-compute@developer.gserviceaccount.com" \
+     --role="roles/datastore.user"
+   ```
+
+#### Local Testing with Firestore Emulator (Optional)
+For local development that matches the Cloud environment:
+```bash
+# Install Firestore emulator
+gcloud components install cloud-firestore-emulator
+
+# Start emulator
+gcloud emulators firestore start
+
+# Set environment variable to use emulator
+export FIRESTORE_EMULATOR_HOST=localhost:8080
+export USE_FIRESTORE=true
+export GOOGLE_CLOUD_PROJECT=your-project-id
+
+# Run your app locally
+python app.py
+```

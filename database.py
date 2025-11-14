@@ -1,12 +1,13 @@
+import os
 import sqlite3
 import json
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import re
 
 class Database:
-    def __init__(self, db_path='events.db'):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None):
+        self.db_path = db_path or os.getenv('DATABASE_PATH', 'events.db')
         self.init_db()
     
     def init_db(self):

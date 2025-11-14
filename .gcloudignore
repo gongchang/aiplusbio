@@ -1,0 +1,30 @@
+# Files excluded from Cloud Build / Cloud Functions uploads
+.gcloudignore
+.git/
+.gitignore
+
+# Virtual environments & caches
+__pycache__/
+*.py[cod]
+*.py.class
+
+# Local environments
+.env
+.env.*
+aiplusbio/
+cloudenv/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Tests and local artifacts (optional to exclude)
+htmlcov/
+.coverage*
+*.log
+
+# Exclude large one-off scripts that break Cloud Functions packaging
+comprehensive_fix.py
+fix_scraping_issues_final.py
+improve_duplicate_detection.py
+

@@ -1,21 +1,27 @@
 # Environment files with sensitive data
 .env
+.env.*
 config.env.example
-config.production.env
+# Note: config.production.env may contain non-sensitive defaults, keep it if needed
 
 # Python cache
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
 .Python
 *.so
+*.egg
+*.egg-info/
+dist/
+build/
 
-# Virtual environment
+# Virtual environments
 venv/
 env/
 ENV/
 aiplusbio/
+cloudenv/
 
 # Database files
 *.db
@@ -27,21 +33,29 @@ aiplusbio/
 .idea/
 *.swp
 *.swo
+*.sublime-*
 
 # OS files
 .DS_Store
 Thumbs.db
+*.orig
 
 # Logs
 *.log
+logs/
 
 # Temporary files
 *.tmp
 *.temp
+tmp/
+temp/
 
-# Google Cloud Build
-cloudbuild.yaml
+# Test artifacts
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+.tox/
 
-# Docker
-Dockerfile
-docker-compose.yml
+# Note: Dockerfile, docker-compose.yml, and cloudbuild.yaml are needed for deployment
+# Do NOT ignore them

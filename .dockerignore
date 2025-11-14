@@ -86,8 +86,6 @@ coverage.xml
 .python-version
 
 # Docker
-Dockerfile*
-docker-compose*
 .dockerignore
 
 

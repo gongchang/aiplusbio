@@ -13,6 +13,13 @@ from free_api_computing_searcher import FreeAPIComputingSearcher
 from enhanced_tech_computing_searcher import EnhancedTechComputingSearcher
 from simple_tech_event_searcher import SimpleTechEventSearcher
 
+USE_FIRESTORE = os.getenv('USE_FIRESTORE', 'false').lower() == 'true'
+if USE_FIRESTORE:
+    from firestoreservice import EventStore
+    event_store = EventStore()
+else:
+    event_store = None
+
 app = Flask(__name__)
 CORS(app)
 
@@ -36,6 +43,22 @@ _cache_duration = 3600  # Cache for 1 hour
 _social_media_cache = {}
 _social_media_cache_timestamp = None
 _social_media_cache_duration = 1800  # Cache for 30 minutes
+
+def _prepare_events_for_firestore(events):
+    normalised = []
+    for event in events:
+        data = dict(event)
+        source_url = data.get('source_url') or data.get('url') or ''
+        data['source_url'] = source_url
+        data['url'] = data.get('url') or source_url
+        data['institution'] = data.get('institution') or db.get_institution_from_url(source_url)
+        data['is_virtual'] = bool(data.get('is_virtual', False))
+        data['requires_registration'] = bool(data.get('requires_registration', False))
+        if 'categories' not in data or data['categories'] is None:
+            data['categories'] = []
+        normalised.append(data)
+    return normalised
+
 
 def scrape_website_description(url):
     """Scrape description from a website URL"""
@@ -303,7 +326,10 @@ def get_events():
         others_filter = request.args.get('others', 'true').lower() == 'true'
         
         # Get events from database
-        events = db.get_events()
+        if USE_FIRESTORE and event_store:
+            events = event_store.list_events(limit=500)
+        else:
+            events = db.get_events()
         
         # Apply filters
         filtered_events = []
@@ -355,6 +381,9 @@ def trigger_scrape():
             categories = categorizer.categorize_event(event)
             event['categories'] = categories
             db.update_event_categories(event['id'], categories)
+
+        if USE_FIRESTORE and event_store and new_events:
+            event_store.upsert_events(_prepare_events_for_firestore(new_events))
         
         return jsonify({
             'success': True,
