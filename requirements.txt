@@ -12,3 +12,5 @@ python-dotenv==1.0.0
 feedparser==6.0.10
 selenium==4.15.2
 webdriver-manager==4.0.1 
+pytest==8.4.2
+pytest-asyncio==1.2.0 
