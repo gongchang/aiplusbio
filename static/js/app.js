@@ -12,63 +12,55 @@ class EventsApp {
             brown: true,
             others: true
         };
-        this.eventListenersSetup = false;
+        this.eventsById = new Map();
+        this.eventsByDate = new Map();
+        this.calendarView = 'month';
+        this.currentDate = new Date();
+        this.searchDebounceTimer = null;
         
-        console.log('EventsApp constructor called');
         this.init().catch(error => {
             console.error('Error initializing EventsApp:', error);
         });
     }
     
     async init() {
-        console.log('EventsApp init started');
         this.bindEvents();
         await this.loadEvents();
         this.setupAutoRefresh();
-        
-        // Initialize calendar properties
-        this.calendarView = 'month';
-        this.currentDate = new Date();
-        console.log('Calendar initialized with date:', this.currentDate.toLocaleDateString());
-        
-        // Test if updateCalendar method exists
-        console.log('updateCalendar method exists:', typeof this.updateCalendar);
-        console.log('Available methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(this)));
-        
-        console.log('EventsApp init completed');
     }
     
     bindEvents() {
         // Search input
-        document.getElementById('searchInput').addEventListener('input', async (e) => {
+        document.getElementById('searchInput').addEventListener('input', (e) => {
             this.currentFilters.search = e.target.value.toLowerCase();
-            await this.applyFilters();
+            window.clearTimeout(this.searchDebounceTimer);
+            this.searchDebounceTimer = window.setTimeout(() => this.applyFilters(), 120);
         });
         
         // Institution filters
-        document.getElementById('mitFilter').addEventListener('change', async (e) => {
+        document.getElementById('mitFilter').addEventListener('change', (e) => {
             this.currentFilters.mit = e.target.checked;
-            await this.applyFilters();
+            this.applyFilters();
         });
         
-        document.getElementById('harvardFilter').addEventListener('change', async (e) => {
+        document.getElementById('harvardFilter').addEventListener('change', (e) => {
             this.currentFilters.harvard = e.target.checked;
-            await this.applyFilters();
+            this.applyFilters();
         });
         
-        document.getElementById('buFilter').addEventListener('change', async (e) => {
+        document.getElementById('buFilter').addEventListener('change', (e) => {
             this.currentFilters.bu = e.target.checked;
-            await this.applyFilters();
+            this.applyFilters();
         });
         
-        document.getElementById('brownFilter').addEventListener('change', async (e) => {
+        document.getElementById('brownFilter').addEventListener('change', (e) => {
             this.currentFilters.brown = e.target.checked;
-            await this.applyFilters();
+            this.applyFilters();
         });
         
-        document.getElementById('othersFilter').addEventListener('change', async (e) => {
+        document.getElementById('othersFilter').addEventListener('change', (e) => {
             this.currentFilters.others = e.target.checked;
-            await this.applyFilters();
+            this.applyFilters();
         });
         
         // Buttons
@@ -83,34 +75,13 @@ class EventsApp {
     
     async loadEvents() {
         try {
-            const params = new URLSearchParams({
-                search: this.currentFilters.search,
-                mit: this.currentFilters.mit.toString(),
-                harvard: this.currentFilters.harvard.toString(),
-                bu: this.currentFilters.bu.toString(),
-                brown: this.currentFilters.brown.toString(),
-                others: this.currentFilters.others.toString()
-            });
-            
-            const response = await fetch(`/api/events?${params}`);
+            const response = await fetch('/api/events');
             const data = await response.json();
             
             if (data.success) {
-                this.events = data.events;
-                this.filteredEvents = [...this.events];
-                console.log('Loaded', this.events.length, 'events');
-                this.renderEvents();
-                this.updateEventCount();
-                
-                // Update calendar after events are loaded
-                console.log('About to call updateCalendar() after loading events...');
-                console.log('this.updateCalendar exists:', typeof this.updateCalendar);
-                try {
-                    this.updateCalendar();
-                    console.log('updateCalendar() called successfully after loading events');
-                } catch (error) {
-                    console.error('Error calling updateCalendar() after loading events:', error);
-                }
+                this.events = data.events || [];
+                this.rebuildEventIndex();
+                this.applyFilters();
             } else {
                 this.showError('Failed to load events: ' + data.error);
             }
@@ -119,9 +90,51 @@ class EventsApp {
         }
     }
     
-    async applyFilters() {
-        // Reload events with current filters from the server
-        await this.loadEvents();
+    applyFilters() {
+        const searchQuery = this.currentFilters.search.trim();
+
+        this.filteredEvents = this.events.filter(event => {
+            if (searchQuery && !this.eventMatchesSearch(event, searchQuery)) {
+                return false;
+            }
+
+            return this.institutionIsVisible(event.institution || 'Others');
+        });
+
+        this.rebuildFilteredDateIndex();
+        this.renderEvents();
+        this.updateEventCount();
+        if (typeof this.updateGoogleCalendar === 'function') {
+            this.updateGoogleCalendar();
+        }
+    }
+
+    rebuildEventIndex() {
+        this.eventsById = new Map(this.events.map(event => [String(event.id), event]));
+    }
+
+    rebuildFilteredDateIndex() {
+        this.eventsByDate = new Map();
+        this.filteredEvents.forEach(event => {
+            const dateKey = event.date || '';
+            if (!this.eventsByDate.has(dateKey)) {
+                this.eventsByDate.set(dateKey, []);
+            }
+            this.eventsByDate.get(dateKey).push(event);
+        });
+    }
+
+    eventMatchesSearch(event, searchQuery) {
+        const searchableText = `${event.title || ''} ${event.description || ''} ${event.location || ''}`.toLowerCase();
+        return searchableText.includes(searchQuery);
+    }
+
+    institutionIsVisible(institution) {
+        if (institution === 'MIT') return this.currentFilters.mit;
+        if (institution === 'Harvard') return this.currentFilters.harvard;
+        if (institution === 'BU') return this.currentFilters.bu;
+        if (institution === 'Brown') return this.currentFilters.brown;
+        return this.currentFilters.others;
     }
     
     renderEvents() {
@@ -135,21 +148,53 @@ class EventsApp {
                     <p>Try adjusting your filters or refresh the events.</p>
                 </div>
             `;
+            this.updateCalendar();
             return;
         }
         
         eventsList.innerHTML = this.filteredEvents.map(event => this.renderEventItem(event)).join('');
         
         // Add click handlers to event items
-        eventsList.querySelectorAll('.event-item').forEach((item, index) => {
+        eventsList.querySelectorAll('.event-item').forEach((item) => {
             item.addEventListener('click', () => {
-                this.showEventDetails(this.filteredEvents[index]);
+                const event = this.getEventById(item.dataset.eventId);
+                if (event) {
+                    this.showEventDetails(event);
+                }
             });
         });
         
-        // Update the calendar
-        console.log('About to update calendar...');
         this.updateCalendar();
+    }
+
+    getEventById(eventId) {
+        return this.eventsById.get(String(eventId));
+    }
+
+    escapeHtml(value = '') {
+        return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
+    }
+
+    escapeAttribute(value = '') {
+        return this.escapeHtml(value);
+    }
+
+    escapeRegExp(value = '') {
+        return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    safeHostname(url) {
+        try {
+            return new URL(url).hostname;
+        } catch (error) {
+            return 'Unknown source';
+        }
     }
     
     renderEventItem(event) {
@@ -165,8 +210,8 @@ class EventsApp {
         
         const timeStr = (event.time || '').trim();
         const showTime = timeStr && timeStr.toLowerCase() !== '12:00 am' && timeStr !== '00:00';
-        const time = showTime ? ` • ${timeStr}` : '';
-        const location = event.location ? ` • ${event.location}` : '';
+        const time = showTime ? ` &bull; ${this.escapeHtml(timeStr)}` : '';
+        const location = event.location ? ` &bull; ${this.escapeHtml(event.location)}` : '';
         
         const badges = [];
         
@@ -183,7 +228,7 @@ class EventsApp {
         }
         
         return `
-            <div class="list-group-item event-item" data-event-id="${event.id}">
+            <div class="list-group-item event-item" data-event-id="${this.escapeAttribute(event.id)}">
                 <div class="d-flex justify-content-between align-items-start">
                     <div class="flex-grow-1">
                         <div class="event-date">
@@ -195,7 +240,7 @@ class EventsApp {
                             ${badges.join('')}
                             <div class="mt-2">
                                 <small class="text-muted">
-                                    <i class="fas fa-globe me-1"></i>${new URL(event.source_url).hostname}
+                                    <i class="fas fa-globe me-1"></i>${this.escapeHtml(this.safeHostname(event.source_url))}
                                 </small>
                             </div>
                         </div>
@@ -209,10 +254,12 @@ class EventsApp {
     }
     
     highlightSearch(text) {
-        if (!this.currentFilters.search || !text) return text;
+        const escapedText = this.escapeHtml(text || '');
+        const searchQuery = this.currentFilters.search.trim();
+        if (!searchQuery || !text) return escapedText;
         
-        const regex = new RegExp(`(${this.currentFilters.search})`, 'gi');
-        return text.replace(regex, '<span class="highlight">$1</span>');
+        const regex = new RegExp(`(${this.escapeRegExp(searchQuery)})`, 'gi');
+        return escapedText.replace(regex, '<span class="highlight">$1</span>');
     }
     
     updateEventCount() {
@@ -224,7 +271,7 @@ class EventsApp {
         const modal = new bootstrap.Modal(document.getElementById('eventModal'));
         
         document.getElementById('eventModalTitle').textContent = event.title;
-        document.getElementById('eventModalLink').href = event.url;
+        document.getElementById('eventModalLink').href = event.url || '#';
         
         let date = this.parseISODateLocal(event.date);
         if (!this.isValidDate(date)) {
@@ -236,13 +283,19 @@ class EventsApp {
             month: 'long', 
             day: 'numeric' 
         });
+        const eventUrl = event.url || '#';
+        const sourceUrl = event.source_url || '#';
+        const sourceHostname = this.safeHostname(sourceUrl);
+        const eventTime = this.escapeHtml(event.time || '');
+        const eventLocation = this.escapeHtml(event.location || '');
+        const eventDescription = this.escapeHtml(event.description || '');
         
         document.getElementById('eventModalBody').innerHTML = `
             <div class="event-detail-row">
                 <div class="event-detail-label">Date & Time</div>
                 <div class="event-detail-value">
                     <i class="fas fa-calendar-day me-1"></i>${formattedDate}
-                    ${event.time ? `<br><i class="fas fa-clock me-1"></i>${event.time}` : ''}
+                    ${event.time ? `<br><i class="fas fa-clock me-1"></i>${eventTime}` : ''}
                 </div>
             </div>
             
@@ -250,7 +303,7 @@ class EventsApp {
             <div class="event-detail-row">
                 <div class="event-detail-label">Location</div>
                 <div class="event-detail-value">
-                    <i class="fas fa-map-marker-alt me-1"></i>${event.location}
+                    <i class="fas fa-map-marker-alt me-1"></i>${eventLocation}
                 </div>
             </div>
             ` : ''}
@@ -272,14 +325,14 @@ class EventsApp {
             ${event.description ? `
             <div class="event-detail-row">
                 <div class="event-detail-label">Description</div>
-                <div class="event-detail-value">${event.description}</div>
+                <div class="event-detail-value">${eventDescription}</div>
             </div>
             ` : ''}
             
             <div class="event-detail-row">
                 <div class="event-detail-label">Event URL</div>
                 <div class="event-detail-value">
-                    <a href="${event.url}" target="_blank" class="text-decoration-none">
+                    <a href="${this.escapeAttribute(eventUrl)}" target="_blank" rel="noopener noreferrer" class="text-decoration-none">
                         <i class="fas fa-external-link-alt me-1"></i>View Event Details
                     </a>
                 </div>
@@ -288,8 +341,8 @@ class EventsApp {
             <div class="event-detail-row">
                 <div class="event-detail-label">Source Website</div>
                 <div class="event-detail-value">
-                    <a href="${event.source_url}" target="_blank" class="text-decoration-none">
-                        <i class="fas fa-globe me-1"></i>${new URL(event.source_url).hostname}
+                    <a href="${this.escapeAttribute(sourceUrl)}" target="_blank" rel="noopener noreferrer" class="text-decoration-none">
+                        <i class="fas fa-globe me-1"></i>${this.escapeHtml(sourceHostname)}
                     </a>
                 </div>
             </div>
@@ -364,14 +417,14 @@ class EventsApp {
                             <tbody>
                                 ${stats.recent_scrapes.map(scrape => `
                                     <tr>
-                                        <td>${new URL(scrape[0]).hostname}</td>
+                                        <td>${this.escapeHtml(this.safeHostname(scrape[0]))}</td>
                                         <td>
                                             <span class="badge ${scrape[1] === 'success' ? 'bg-success' : 'bg-danger'}">
-                                                ${scrape[1]}
+                                                ${this.escapeHtml(scrape[1])}
                                             </span>
                                         </td>
-                                        <td>${scrape[2]}</td>
-                                        <td>${new Date(scrape[3]).toLocaleString()}</td>
+                                        <td>${this.escapeHtml(scrape[2])}</td>
+                                        <td>${this.escapeHtml(new Date(scrape[3]).toLocaleString())}</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -404,7 +457,7 @@ class EventsApp {
         alertDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
         alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
         alertDiv.innerHTML = `
-            ${message}
+            ${this.escapeHtml(message)}
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         `;
         
@@ -433,10 +486,7 @@ class EventsApp {
         const updateGoogleCalendar = () => {
             const calendarIframe = document.getElementById('googleCalendar');
             if (calendarIframe && this.filteredEvents.length > 0) {
-                // Create a simple calendar view with event links
-                // For now, we'll add a note about events
-                const eventCount = this.filteredEvents.length;
-                console.log(`Google Calendar updated with ${eventCount} events`);
+                calendarIframe.dataset.eventCount = String(this.filteredEvents.length);
             }
         };
         
@@ -449,41 +499,25 @@ class EventsApp {
     }
     
     updateCalendar() {
-        console.log('=== updateCalendar() called ===');
-        console.log('this object:', this);
-        console.log('this.calendarView:', this.calendarView);
-        console.log('this.currentDate:', this.currentDate);
-        
         const calendarContainer = document.getElementById('calendarContainer');
         if (!calendarContainer) {
-            console.log('Calendar container not found');
             return;
         }
         
         // Initialize calendar if not already done
         if (!this.calendarView || !this.currentDate) {
-            console.log('Initializing calendar...');
             this.calendarView = 'month';
             this.currentDate = new Date();
         }
-        
-        console.log('Updating calendar with', this.filteredEvents.length, 'events');
-        console.log('Current date:', this.currentDate.toLocaleDateString());
-        console.log('Calendar view:', this.calendarView);
-        
+
         try {
-            console.log('Calendar view is:', this.calendarView);
             if (this.calendarView === 'month') {
-                console.log('Rendering month view...');
                 this.renderMonthView();
             } else if (this.calendarView === 'week') {
-                console.log('Rendering week view...');
                 this.renderWeekTimeGridView();
             } else if (this.calendarView === 'day') {
-                console.log('Rendering day view...');
                 this.renderDayView();
             }
-            console.log('=== updateCalendar() completed ===');
         } catch (error) {
             console.error('Error rendering calendar:', error);
             calendarContainer.innerHTML = `
@@ -497,7 +531,6 @@ class EventsApp {
     }
     
     renderMonthView() {
-        console.log('Rendering month view...');
         const calendarContainer = document.getElementById('calendarContainer');
         if (!calendarContainer) {
             console.error('Calendar container not found!');
@@ -513,7 +546,6 @@ class EventsApp {
         startDate.setDate(startDate.getDate() - firstDay.getDay());
         
         const monthName = this.currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-        console.log('Month name:', monthName);
         
         const calendarHTML = `
             <div class="calendar-header">
@@ -575,18 +607,19 @@ class EventsApp {
                 } else {
                     eventClass += ' onsite';
                 }
+                const title = event.title || 'Untitled Event';
+                const truncatedTitle = title.length > 15 ? `${title.substring(0, 15)}...` : title;
                 
                 return `
                     <div class="${eventClass}" 
-                         title="${event.title}"
-                         data-event-id="${event.id}"
-                         data-event='${JSON.stringify(event).replace(/'/g, "&apos;")}'>
-                        ${event.title.substring(0, 15)}${event.title.length > 15 ? '...' : ''}
+                         title="${this.escapeAttribute(title)}"
+                         data-event-id="${this.escapeAttribute(event.id)}">
+                        ${this.escapeHtml(truncatedTitle)}
                     </div>
                 `;
             }).join('');
             
-            const isoDate = new Date(currentDate).toISOString().split('T')[0];
+            const isoDate = this.formatLocalDateYYYYMMDD(currentDate);
             daysHTML += `
                 <div class="${dayClass}" data-date="${isoDate}">
                     <div class="calendar-day-number">${currentDate.getDate()}</div>
@@ -606,7 +639,6 @@ class EventsApp {
     }
     
     renderWeekTimeGridView() {
-        console.log('Rendering week time-grid view...');
         const calendarContainer = document.getElementById('calendarContainer');
         if (!calendarContainer) return;
         const weekStart = this.getWeekStart(this.currentDate);
@@ -618,7 +650,7 @@ class EventsApp {
         const dayHeaders = Array.from({ length: 7 }, (_, i) => {
             const d = new Date(weekStart);
             d.setDate(d.getDate() + i);
-            const iso = d.toISOString().split('T')[0];
+            const iso = this.formatLocalDateYYYYMMDD(d);
             const label = `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${d.getDate()}`;
             return `<div class="calendar-week-day-header" data-date="${iso}">${label}</div>`;
         }).join('');
@@ -651,7 +683,6 @@ class EventsApp {
     }
 
     renderDayView() {
-        console.log('Rendering day view...');
         const calendarContainer = document.getElementById('calendarContainer');
         if (!calendarContainer) return;
         const d = new Date(this.currentDate);
@@ -825,10 +856,12 @@ class EventsApp {
                 const dayWidthPct = 100 / 7;
                 const left = dayLeftPct + (p.leftPct * dayWidthPct / 100);
                 const width = (p.widthPct * dayWidthPct) / 100;
+                const title = p.ev.title || 'Untitled Event';
+                const time = p.ev.time || '';
                 eventBlocks.push(`
-                    <div class="${cls}" style="top:${p.topPct}%; left:${left}%; height:${p.heightPct}%; width:${width}%" data-event='${JSON.stringify(p.ev).replace(/'/g, "&apos;")}' title='${p.ev.title}'>
-                        <div class="time-event-title">${p.ev.title}</div>
-                        ${p.ev.time ? `<div class=\"time-event-time\">${p.ev.time}</div>` : ''}
+                    <div class="${cls}" style="top:${p.topPct}%; left:${left}%; height:${p.heightPct}%; width:${width}%" data-event-id="${this.escapeAttribute(p.ev.id)}" title="${this.escapeAttribute(title)}">
+                        <div class="time-event-title">${this.escapeHtml(title)}</div>
+                        ${time ? `<div class="time-event-time">${this.escapeHtml(time)}</div>` : ''}
                     </div>
                 `);
             });
@@ -842,10 +875,12 @@ class EventsApp {
         return laidOut.map(p => {
             let cls = 'time-event';
             if (p.ev.is_virtual) cls += ' virtual'; else cls += ' onsite';
+            const title = p.ev.title || 'Untitled Event';
+            const time = p.ev.time || '';
             return `
-                <div class="${cls}" style="top:${p.topPct}%; left:${p.leftPct}%; height:${p.heightPct}%; width:${p.widthPct}%" data-event='${JSON.stringify(p.ev).replace(/'/g, "&apos;")}' title='${p.ev.title}'>
-                    <div class="time-event-title">${p.ev.title}</div>
-                    ${p.ev.time ? `<div class=\"time-event-time\">${p.ev.time}</div>` : ''}
+                <div class="${cls}" style="top:${p.topPct}%; left:${p.leftPct}%; height:${p.heightPct}%; width:${p.widthPct}%" data-event-id="${this.escapeAttribute(p.ev.id)}" title="${this.escapeAttribute(title)}">
+                    <div class="time-event-title">${this.escapeHtml(title)}</div>
+                    ${time ? `<div class="time-event-time">${this.escapeHtml(time)}</div>` : ''}
                 </div>
             `;
         }).join('');
@@ -853,18 +888,7 @@ class EventsApp {
     
     getEventsForDate(date) {
         const targetStr = this.formatLocalDateYYYYMMDD(date);
-        const events = this.filteredEvents.filter(event => {
-            const eventDate = this.parseISODateLocal(event.date);
-            if (!this.isValidDate(eventDate)) return false;
-            const eventDateStr = this.formatLocalDateYYYYMMDD(eventDate);
-            return eventDateStr === targetStr;
-        });
-        
-        if (events.length > 0) {
-            console.log(`Found ${events.length} events for ${targetStr}:`, events.map(e => e.title.substring(0, 30)));
-        }
-        
-        return events;
+        return this.eventsByDate.get(targetStr) || [];
     }
     
     getWeekStart(date) {
@@ -898,24 +922,8 @@ class EventsApp {
     }
     
     changeCalendarView(view) {
-        console.log('Changing calendar view to:', view);
-        console.log('Previous view was:', this.calendarView);
         this.calendarView = view;
-        console.log('Calling updateCalendar()...');
-        console.log('this.updateCalendar exists:', typeof this.updateCalendar);
-        console.log('this object in changeCalendarView:', this);
-        
-        try {
-            if (typeof this.updateCalendar === 'function') {
-                this.updateCalendar();
-                console.log('updateCalendar() called successfully');
-            } else {
-                console.error('updateCalendar is not a function!');
-                console.log('Available methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(this)));
-            }
-        } catch (error) {
-            console.error('Error calling updateCalendar():', error);
-        }
+        this.updateCalendar();
         
         // Update button states
         document.querySelectorAll('.calendar-view-btn').forEach(btn => {
@@ -928,110 +936,57 @@ class EventsApp {
             activeBtn.classList.remove('btn-outline-secondary');
             activeBtn.classList.add('btn-primary');
         }
-        console.log('changeCalendarView() completed');
     }
     
     previousMonth() {
-        console.log('Previous month clicked');
         if (!this.currentDate) {
-            console.log('currentDate not initialized, initializing...');
             this.currentDate = new Date();
         }
-        console.log('Date before:', this.currentDate.toLocaleDateString());
         this.currentDate.setMonth(this.currentDate.getMonth() - 1);
-        console.log('Date after:', this.currentDate.toLocaleDateString());
-        console.log('Calling updateCalendar()...');
-        try {
-            this.updateCalendar();
-            console.log('updateCalendar() called successfully');
-        } catch (error) {
-            console.error('Error calling updateCalendar():', error);
-        }
+        this.updateCalendar();
     }
     
     nextMonth() {
-        console.log('Next month clicked');
         if (!this.currentDate) {
-            console.log('currentDate not initialized, initializing...');
             this.currentDate = new Date();
         }
-        console.log('Date before:', this.currentDate.toLocaleDateString());
         this.currentDate.setMonth(this.currentDate.getMonth() + 1);
-        console.log('Date after:', this.currentDate.toLocaleDateString());
-        console.log('Calling updateCalendar()...');
-        try {
-            this.updateCalendar();
-            console.log('updateCalendar() called successfully');
-        } catch (error) {
-            console.error('Error calling updateCalendar():', error);
-        }
+        this.updateCalendar();
     }
     
     previousWeek() {
-        console.log('Previous week clicked');
         if (!this.currentDate) {
-            console.log('currentDate not initialized, initializing...');
             this.currentDate = new Date();
         }
-        console.log('Date before:', this.currentDate.toLocaleDateString());
         this.currentDate.setDate(this.currentDate.getDate() - 7);
-        console.log('Date after:', this.currentDate.toLocaleDateString());
-        console.log('Calling updateCalendar()...');
-        try {
-            this.updateCalendar();
-            console.log('updateCalendar() called successfully');
-        } catch (error) {
-            console.error('Error calling updateCalendar():', error);
-        }
+        this.updateCalendar();
     }
     
     previousDay() {
-        console.log('Previous day clicked');
         if (!this.currentDate) {
             this.currentDate = new Date();
         }
         this.currentDate.setDate(this.currentDate.getDate() - 1);
-        try {
-            this.updateCalendar();
-        } catch (error) {
-            console.error('Error calling updateCalendar():', error);
-        }
+        this.updateCalendar();
     }
     
     nextDay() {
-        console.log('Next day clicked');
         if (!this.currentDate) {
             this.currentDate = new Date();
         }
         this.currentDate.setDate(this.currentDate.getDate() + 1);
-        try {
-            this.updateCalendar();
-        } catch (error) {
-            console.error('Error calling updateCalendar():', error);
-        }
+        this.updateCalendar();
     }
 
     nextWeek() {
-        console.log('Next week clicked');
         if (!this.currentDate) {
-            console.log('currentDate not initialized, initializing...');
             this.currentDate = new Date();
         }
-        console.log('Date before:', this.currentDate.toLocaleDateString());
         this.currentDate.setDate(this.currentDate.getDate() + 7);
-        console.log('Date after:', this.currentDate.toLocaleDateString());
-        console.log('Calling updateCalendar()...');
-        try {
-            this.updateCalendar();
-            console.log('updateCalendar() called successfully');
-        } catch (error) {
-            console.error('Error calling updateCalendar():', error);
-        }
+        this.updateCalendar();
     }
     
     selectEventFromCalendar(event) {
-        console.log('Event selected from calendar:', event.title);
-        
         // Show event details modal
         this.showEventDetails(event);
         
@@ -1066,8 +1021,6 @@ class EventsApp {
     }
     
     setupCalendarEventListeners() {
-        console.log('Setting up calendar event listeners...');
-        
         // Remove any existing listeners to avoid duplicates
         if (this.calendarClickHandler) {
             document.removeEventListener('click', this.calendarClickHandler);
@@ -1075,15 +1028,21 @@ class EventsApp {
         
         // Create the event handler
         this.calendarClickHandler = (e) => {
-            console.log('Click event detected on:', e.target);
+            const eventElement = e.target.closest('.calendar-event, .time-event');
+            if (eventElement) {
+                e.stopPropagation();
+                const event = this.getEventById(eventElement.dataset.eventId);
+                if (event) {
+                    this.selectEventFromCalendar(event);
+                }
+                return;
+            }
             
             // Calendar navigation buttons
             if (e.target.closest('.calendar-nav-btn')) {
                 const button = e.target.closest('.calendar-nav-btn');
                 const action = button.getAttribute('data-action');
-                
-                console.log('Calendar navigation clicked:', action);
-                
+
                 if (action === 'previous') {
                     if (this.calendarView === 'month') {
                         this.previousMonth();
@@ -1101,6 +1060,7 @@ class EventsApp {
                         this.nextDay();
                     }
                 }
+                return;
             }
             
             // Calendar view toggle buttons
@@ -1109,9 +1069,9 @@ class EventsApp {
                 const button = e.target.closest('.calendar-view-btn');
                 const view = button.getAttribute('data-view');
                 if (view) {
-                    console.log('Calendar view toggle clicked:', view);
                     this.changeCalendarView(view);
                 }
+                return;
             }
             
             // Click on a day cell in month view -> go to that week
@@ -1119,9 +1079,10 @@ class EventsApp {
                 const cell = e.target.closest('.calendar-day');
                 const iso = cell.getAttribute('data-date');
                 if (iso) {
-                    this.currentDate = new Date(iso);
+                    this.currentDate = this.parseISODateLocal(iso);
                     this.changeCalendarView('week');
                 }
+                return;
             }
 
             // Click on a day header in week view -> go to that day
@@ -1129,9 +1090,10 @@ class EventsApp {
                 const header = e.target.closest('.calendar-week-day-header');
                 const iso = header.getAttribute('data-date');
                 if (iso) {
-                    this.currentDate = new Date(iso);
+                    this.currentDate = this.parseISODateLocal(iso);
                     this.changeCalendarView('day');
                 }
+                return;
             }
 
             // Click anywhere in a week's day column (not on an event) -> go to that day
@@ -1151,77 +1113,10 @@ class EventsApp {
                     this.changeCalendarView('day');
                 }
             }
-
-            // Calendar event clicks (month view tiles)
-            if (e.target.closest('.calendar-event')) {
-                const eventElement = e.target.closest('.calendar-event');
-                const eventData = eventElement.getAttribute('data-event');
-                if (eventData) {
-                    try {
-                        const event = JSON.parse(eventData);
-                        console.log('Calendar event clicked:', event.title);
-                        this.selectEventFromCalendar(event);
-                    } catch (error) {
-                        console.error('Error parsing event data:', error);
-                    }
-                }
-            }
-
-            // Time-grid event clicks (week/day views)
-            if (e.target.closest('.time-event')) {
-                const eventElement = e.target.closest('.time-event');
-                const eventData = eventElement.getAttribute('data-event');
-                if (eventData) {
-                    try {
-                        const event = JSON.parse(eventData);
-                        console.log('Time-grid event clicked:', event.title);
-                        this.selectEventFromCalendar(event);
-                    } catch (error) {
-                        console.error('Error parsing event data:', error);
-                    }
-                }
-            }
         };
         
         // Add the event listener
         document.addEventListener('click', this.calendarClickHandler);
-        console.log('Calendar event listeners set up successfully');
-    }
-    
-    debugCalendarButtons() {
-        console.log('=== Debugging Calendar Buttons ===');
-        
-        const calendarContainer = document.getElementById('calendarContainer');
-        if (!calendarContainer) {
-            console.log('❌ Calendar container not found');
-            return;
-        }
-        
-        // Check navigation buttons
-        const navButtons = calendarContainer.querySelectorAll('.calendar-nav-btn');
-        console.log(`Navigation buttons found: ${navButtons.length}`);
-        navButtons.forEach((btn, index) => {
-            console.log(`Nav button ${index + 1}:`, {
-                action: btn.getAttribute('data-action'),
-                text: btn.textContent.trim(),
-                classes: btn.className,
-                visible: btn.offsetParent !== null
-            });
-        });
-        
-        // Check view toggle buttons
-        const viewButtons = document.querySelectorAll('.calendar-view-btn');
-        console.log(`View toggle buttons found: ${viewButtons.length}`);
-        viewButtons.forEach((btn, index) => {
-            console.log(`View button ${index + 1}:`, {
-                view: btn.getAttribute('data-view'),
-                text: btn.textContent.trim(),
-                classes: btn.className,
-                visible: btn.offsetParent !== null
-            });
-        });
-        
-        console.log('=== End Debug ===');
     }
 }
 

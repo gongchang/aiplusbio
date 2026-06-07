@@ -305,7 +305,10 @@ class Database:
         days_ahead: int = 365,
         include_past: bool = False,
         lookback_days: int = 365,
-        limit: int = 1000
+        limit: int = 1000,
+        search_query: Optional[str] = None,
+        institutions: Optional[List[str]] = None,
+        include_other_institutions: bool = True
     ) -> List[Dict[str, Any]]:
         """Get events in a configurable date window with optimized query"""
         conn = sqlite3.connect(self.db_path)
@@ -319,15 +322,48 @@ class Database:
         else:
             start_date = today
         
-        # Optimized query with indexing hints
-        cursor.execute('''
+        where_clauses = ['date >= ?', 'date <= ?']
+        params = [start_date.isoformat(), future_date.isoformat()]
+
+        if institutions is not None:
+            selected_institutions = [inst for inst in institutions if inst]
+            primary_institutions = ['MIT', 'Harvard', 'BU', 'Brown']
+            institution_clauses = []
+
+            if selected_institutions:
+                placeholders = ','.join('?' for _ in selected_institutions)
+                institution_clauses.append(f"institution IN ({placeholders})")
+                params.extend(selected_institutions)
+            if include_other_institutions:
+                placeholders = ','.join('?' for _ in primary_institutions)
+                institution_clauses.append(
+                    f"(institution IS NULL OR institution = '' OR institution NOT IN ({placeholders}))"
+                )
+                params.extend(primary_institutions)
+            if institution_clauses:
+                where_clauses.append(f"({' OR '.join(institution_clauses)})")
+            else:
+                conn.close()
+                return []
+
+        if search_query:
+            like_query = f"%{search_query.lower()}%"
+            where_clauses.append(
+                "(LOWER(IFNULL(title, '')) LIKE ? OR LOWER(IFNULL(description, '')) LIKE ? "
+                "OR LOWER(IFNULL(location, '')) LIKE ?)"
+            )
+            params.extend([like_query, like_query, like_query])
+
+        params.append(limit)
+        query = f'''
             SELECT id, title, description, date, time, location, url, source_url,
                    is_virtual, requires_registration, categories, institution, created_at
             FROM events
-            WHERE date >= ? AND date <= ?
+            WHERE {' AND '.join(where_clauses)}
             ORDER BY date ASC, time ASC
             LIMIT ?
-        ''', (start_date.isoformat(), future_date.isoformat(), limit))
+        '''
+        cursor.execute(query, params)
         
         events = []
         for row in cursor.fetchall():
@@ -376,8 +412,16 @@ class Database:
         try:
             # Create indexes for faster queries
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_date ON events(date)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_date_time ON events(date, time)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_institution_date ON events(institution, date)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_source ON events(source_url)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_normalized ON events(normalized_title)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_computing_events_date_time ON computing_events(date, time)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_computing_events_cost_date ON computing_events(cost_type, date)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_computing_events_host_date ON computing_events(host, date)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_computing_events_source_date ON computing_events(source, date)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_computing_events_normalized ON computing_events(normalized_title)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraping_log_scraped_at ON scraping_log(scraped_at)')
             conn.commit()
         except Exception as e:
             print(f"Warning: Could not create indexes: {e}")
@@ -604,23 +648,71 @@ class Database:
         finally:
             conn.close()
     
-    def get_computing_events(self, days_ahead: int = 365) -> List[Dict[str, Any]]:
-        """Get all computing events from today onwards"""
+    def get_computing_events(
+        self,
+        days_ahead: int = 365,
+        limit: int = 1000,
+        search_query: Optional[str] = None,
+        cost_types: Optional[List[str]] = None,
+        hosts: Optional[List[str]] = None,
+        sources: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """Get computing events from today onwards with optional database-side filtering"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         # Calculate date range
         today = datetime.now().date()
         future_date = today + timedelta(days=days_ahead)
-        
-        cursor.execute('''
+
+        where_clauses = ["date >= ?", "date <= ?", "date LIKE '____-__-__'"]
+        params = [today.isoformat(), future_date.isoformat()]
+
+        if search_query:
+            like_query = f"%{search_query.lower()}%"
+            where_clauses.append(
+                "(LOWER(IFNULL(title, '')) LIKE ? OR LOWER(IFNULL(description, '')) LIKE ? "
+                "OR LOWER(IFNULL(location, '')) LIKE ?)"
+            )
+            params.extend([like_query, like_query, like_query])
+
+        selected_cost_types = [cost for cost in (cost_types or []) if cost]
+        if selected_cost_types:
+            known_cost_types = [cost for cost in selected_cost_types if cost != 'Unknown']
+            cost_clauses = []
+            if known_cost_types:
+                placeholders = ','.join('?' for _ in known_cost_types)
+                cost_clauses.append(f"cost_type IN ({placeholders})")
+                params.extend(known_cost_types)
+            if 'Unknown' in selected_cost_types:
+                cost_clauses.append("(cost_type IS NULL OR cost_type = '' OR cost_type = 'Unknown')")
+            where_clauses.append(f"({' OR '.join(cost_clauses)})")
+        elif cost_types is not None:
+            conn.close()
+            return []
+
+        selected_hosts = [host for host in (hosts or []) if host]
+        if selected_hosts:
+            placeholders = ','.join('?' for _ in selected_hosts)
+            where_clauses.append(f"host IN ({placeholders})")
+            params.extend(selected_hosts)
+
+        selected_sources = [source for source in (sources or []) if source]
+        if selected_sources:
+            placeholders = ','.join('?' for _ in selected_sources)
+            where_clauses.append(f"source IN ({placeholders})")
+            params.extend(selected_sources)
+
+        params.append(limit)
+        query = f'''
             SELECT id, title, description, date, time, location, url, source_url,
                    is_virtual, requires_registration, categories, host, cost_type, source, created_at
             FROM computing_events 
-            WHERE date >= ? AND date <= ? AND date LIKE '____-__-__'
+            WHERE {' AND '.join(where_clauses)}
             ORDER BY date ASC, time ASC
-            LIMIT 1000
-        ''', (today.isoformat(), future_date.isoformat()))
+            LIMIT ?
+        '''
+        cursor.execute(query, params)
         
         events = []
         for row in cursor.fetchall():

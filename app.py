@@ -3,6 +3,10 @@ from flask_cors import CORS
 import os
 from datetime import datetime, timedelta
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
+from urllib.parse import urlparse
 from event_scraper import EventScraper
 from event_categorizer import EventCategorizer
 from database import Database
@@ -34,8 +38,14 @@ free_api_searcher = FreeAPIComputingSearcher()
 enhanced_tech_searcher = EnhancedTechComputingSearcher()
 simple_tech_searcher = SimpleTechEventSearcher()
 
-# Cache for virtual worldwide events descriptions
-_virtual_events_cache = {}
+DEFAULT_DESCRIPTION = 'AI + Biology related content'
+PRIMARY_INSTITUTIONS = ('MIT', 'Harvard', 'BU', 'Brown')
+
+# Cache for virtual worldwide event cards and descriptions
+_virtual_events_cache = []
+_virtual_description_cache = {}
+_virtual_cache_signature = None
+_virtual_cache_lock = Lock()
 _cache_timestamp = None
 _cache_duration = 3600  # Cache for 1 hour
 
@@ -60,9 +70,46 @@ def _prepare_events_for_firestore(events):
     return normalised
 
 
+def _bool_query_arg(name, default=True):
+    default_value = 'true' if default else 'false'
+    return request.args.get(name, default_value).lower() == 'true'
+
+
+def _selected_institution_filters():
+    selected = []
+    if _bool_query_arg('mit'):
+        selected.append('MIT')
+    if _bool_query_arg('harvard'):
+        selected.append('Harvard')
+    if _bool_query_arg('bu'):
+        selected.append('BU')
+    if _bool_query_arg('brown'):
+        selected.append('Brown')
+    return selected, _bool_query_arg('others')
+
+
+def _event_matches_institution_filters(event, selected_institutions, include_other_institutions):
+    institution = event.get('institution') or 'Others'
+    if institution in PRIMARY_INSTITUTIONS:
+        return institution in selected_institutions
+    return include_other_institutions
+
+
+def _read_url_list(filename):
+    try:
+        with open(filename, 'r') as f:
+            return [
+                line.strip()
+                for line in f
+                if line.strip() and not line.lstrip().startswith('#')
+            ]
+    except FileNotFoundError:
+        return []
+
+
 def scrape_website_description(url):
     """Scrape description from a website URL"""
-    description = 'AI + Biology related content'
+    description = DEFAULT_DESCRIPTION
     try:
         import requests
         from bs4 import BeautifulSoup
@@ -107,7 +154,7 @@ def scrape_website_description(url):
 
     except Exception as e:
         # If scraping fails, use default description
-        description = 'AI + Biology related content'
+        description = DEFAULT_DESCRIPTION
 
     return description
 
@@ -316,47 +363,31 @@ def computing_events():
 def get_events():
     """API endpoint to get all events with optional filtering"""
     try:
-        # Get filter parameters
-        search_query = request.args.get('search', '').lower()
-        # Get institution filters
-        mit_filter = request.args.get('mit', 'true').lower() == 'true'
-        harvard_filter = request.args.get('harvard', 'true').lower() == 'true'
-        bu_filter = request.args.get('bu', 'true').lower() == 'true'
-        brown_filter = request.args.get('brown', 'true').lower() == 'true'
-        others_filter = request.args.get('others', 'true').lower() == 'true'
+        search_query = request.args.get('search', '').strip().lower()
+        selected_institutions, include_other_institutions = _selected_institution_filters()
         
-        # Get events from database
         if USE_FIRESTORE and event_store:
             events = event_store.list_events(limit=500)
-        else:
-            events = db.get_events()
-        
-        # Apply filters
-        filtered_events = []
-        for event in events:
-            # Search filter
-            if search_query:
-                searchable_text = f"{event.get('title', '')} {event.get('description', '')} {event.get('location', '')}".lower()
-                if search_query not in searchable_text:
+            filtered_events = []
+            for event in events:
+                if search_query:
+                    searchable_text = f"{event.get('title', '')} {event.get('description', '')} {event.get('location', '')}".lower()
+                    if search_query not in searchable_text:
+                        continue
+                if not _event_matches_institution_filters(
+                    event,
+                    selected_institutions,
+                    include_other_institutions
+                ):
                     continue
-            
-            # Institution filters
-            event_institution = event.get('institution', 'Others')
-            if event_institution == 'MIT' and not mit_filter:
-                continue
-            elif event_institution == 'Harvard' and not harvard_filter:
-                continue
-            elif event_institution == 'BU' and not bu_filter:
-                continue
-            elif event_institution == 'Brown' and not brown_filter:
-                continue
-            elif event_institution == 'Others' and not others_filter:
-                continue
-                
-            filtered_events.append(event)
-        
-        # Sort by date
-        filtered_events.sort(key=lambda x: x.get('date', ''))
+                filtered_events.append(event)
+            filtered_events.sort(key=lambda x: (x.get('date', ''), x.get('time', '')))
+        else:
+            filtered_events = db.get_events(
+                search_query=search_query or None,
+                institutions=selected_institutions,
+                include_other_institutions=include_other_institutions
+            )
         
         return jsonify({
             'success': True,
@@ -400,45 +431,22 @@ def trigger_scrape():
 def get_computing_events():
     """API endpoint to get all computing events with optional filtering"""
     try:
-        # Get filter parameters
-        search_query = request.args.get('search', '').lower()
-        free_filter = request.args.get('free', 'true').lower() == 'true'
-        paid_filter = request.args.get('paid', 'true').lower() == 'true'
-        unknown_filter = request.args.get('unknown', 'true').lower() == 'true'
+        search_query = request.args.get('search', '').strip().lower()
+        cost_types = []
+        if _bool_query_arg('free'):
+            cost_types.append('Free')
+        if _bool_query_arg('paid'):
+            cost_types.append('Paid')
+        if _bool_query_arg('unknown'):
+            cost_types.append('Unknown')
         
-        # Get host filters
         hosts_param = request.args.get('hosts', '')
-        selected_hosts = set(hosts_param.split(',')) if hosts_param else set()
-        
-        # Get events from database
-        events = db.get_computing_events()
-        
-        # Apply filters
-        filtered_events = []
-        for event in events:
-            # Search filter
-            if search_query:
-                searchable_text = f"{event.get('title', '')} {event.get('description', '')} {event.get('location', '')}".lower()
-                if search_query not in searchable_text:
-                    continue
-            
-            # Cost type filters
-            cost_type = event.get('cost_type', 'Unknown')
-            if cost_type == 'Free' and not free_filter:
-                continue
-            if cost_type == 'Paid' and not paid_filter:
-                continue
-            if cost_type == 'Unknown' and not unknown_filter:
-                continue
-            
-            # Host filters
-            if selected_hosts and event.get('host') not in selected_hosts:
-                continue
-                
-            filtered_events.append(event)
-        
-        # Sort by date
-        filtered_events.sort(key=lambda x: x.get('date', ''))
+        selected_hosts = [host for host in hosts_param.split(',') if host] if hosts_param else None
+        filtered_events = db.get_computing_events(
+            search_query=search_query or None,
+            cost_types=cost_types,
+            hosts=selected_hosts
+        )
         
         return jsonify({
             'success': True,
@@ -503,272 +511,114 @@ def get_stats():
             'error': str(e)
         }), 500
 
+
+def _youtube_channel_name(url):
+    channel_name = 'AI + Biology YouTube Channel'
+    if '@' in url:
+        channel_name = url.split('@', 1)[1].split('/')[0]
+    elif 'channel/' in url:
+        channel_id = url.split('channel/', 1)[1].split('/')[0]
+        if channel_id == 'UCiiOj5GSES6uw21kfXnxj3A':
+            channel_name = 'Online Causal Inference Seminar'
+        else:
+            channel_name = f'AI + Biology Channel ({channel_id[:8]}...)'
+    elif 'user/' in url:
+        channel_name = url.split('user/', 1)[1].split('/')[0]
+    elif 'c/' in url:
+        channel_name = url.split('c/', 1)[1].split('/')[0]
+    return channel_name
+
+
+def _build_virtual_event(url, description):
+    try:
+        domain = urlparse(url).netloc.lower()
+    except Exception:
+        domain = ''
+
+    if 'youtube.com' in url or 'youtu.be' in url:
+        return {
+            'type': 'youtube',
+            'url': url,
+            'title': f'YouTube: {_youtube_channel_name(url)}',
+            'description': description
+        }
+
+    known_titles = {
+        'genbio.ai': 'GenBio AI Seminar Series',
+        'snap.stanford.edu': 'Stanford AI-Bio Seminar',
+        'statsupai.org': 'StatsUP-AI Health Data Science',
+        'bpdmc.org': 'BPDMC Seminar Series',
+        'ai.ucsf.edu': 'UCSF AI Seminar Series'
+    }
+    for domain_key, title in known_titles.items():
+        if domain_key in url:
+            return {
+                'type': 'seminar',
+                'url': url,
+                'title': title,
+                'description': description
+            }
+
+    if any(keyword in domain for keyword in ['seminar', 'talk', 'lecture', 'workshop']):
+        title = f'Seminar Series - {domain}'
+    elif any(keyword in domain for keyword in ['conference', 'symposium', 'meeting', 'congress']):
+        title = f'Virtual Seminar Hub - {domain}'
+    elif any(keyword in domain for keyword in ['edu', 'university', 'institute', 'lab', 'research']):
+        title = f'Research Event - {domain}'
+    else:
+        title = f'Virtual Seminar - {domain or url}'
+
+    return {
+        'type': 'seminar',
+        'url': url,
+        'title': title,
+        'description': description
+    }
+
+
+def _refresh_virtual_description_cache(urls):
+    url_set = set(urls)
+    for cached_url in list(_virtual_description_cache):
+        if cached_url not in url_set:
+            _virtual_description_cache.pop(cached_url, None)
+
+    missing_urls = [url for url in urls if url not in _virtual_description_cache]
+    if not missing_urls:
+        return
+
+    max_workers = min(8, len(missing_urls))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for url, description in zip(missing_urls, executor.map(scrape_website_description, missing_urls)):
+            _virtual_description_cache[url] = description or DEFAULT_DESCRIPTION
+
+
+def _load_virtual_events():
+    global _virtual_events_cache, _virtual_cache_signature, _cache_timestamp
+
+    current_time = time.time()
+    urls = _read_url_list('virtual_worldwide.txt')
+    cache_signature = tuple(urls)
+    with _virtual_cache_lock:
+        cache_expired = _cache_timestamp is None or current_time - _cache_timestamp > _cache_duration
+        if cache_expired or cache_signature != _virtual_cache_signature or not _virtual_events_cache:
+            _refresh_virtual_description_cache(urls)
+            _virtual_events_cache = [
+                _build_virtual_event(url, _virtual_description_cache.get(url, DEFAULT_DESCRIPTION))
+                for url in urls
+            ]
+            _virtual_cache_signature = cache_signature
+            _cache_timestamp = current_time
+
+        return list(_virtual_events_cache)
+
+
 @app.route('/api/virtual-worldwide')
 def get_virtual_worldwide():
     """API endpoint to get virtual worldwide events"""
-    global _virtual_events_cache, _cache_timestamp
-
     try:
-        # Check if cache is still valid
-        import time
-        current_time = time.time()
-
-        if (_cache_timestamp is None or
-            current_time - _cache_timestamp > _cache_duration or
-            not _virtual_events_cache):
-
-            # Cache expired or empty, rebuild it
-            _virtual_events_cache = {}
-            _cache_timestamp = current_time
-
-            # Read virtual worldwide events from file
-            virtual_events = []
-            try:
-                with open('virtual_worldwide.txt', 'r') as f:
-                    urls = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-
-                for url in urls:
-                    # Extract domain for better categorization
-                    from urllib.parse import urlparse
-                    try:
-                        parsed_url = urlparse(url)
-                        domain = parsed_url.netloc.lower()
-                        path = parsed_url.path.lower()
-                    except:
-                        domain = ''
-                        path = ''
-
-                    # Get description from cache or scrape it
-                    if url not in _virtual_events_cache:
-                        _virtual_events_cache[url] = scrape_website_description(url)
-
-                    description = _virtual_events_cache[url]
-
-                    # YouTube channels
-                    if 'youtube.com' in url or 'youtu.be' in url:
-                        # Extract channel name from YouTube URL
-                        channel_name = 'AI + Biology YouTube Channel'
-                        if '@' in url:
-                            channel_name = url.split('@')[1].split('/')[0]
-                        elif 'channel/' in url:
-                            # For channel IDs, we'll use a more descriptive name
-                            channel_id = url.split('channel/')[1].split('/')[0]
-                            # Try to get a more meaningful name based on the channel ID
-                            if channel_id == 'UCiiOj5GSES6uw21kfXnxj3A':
-                                channel_name = 'Online Causal Inference Seminar'
-                            else:
-                                channel_name = f'AI + Biology Channel ({channel_id[:8]}...)'
-                        elif 'user/' in url:
-                            channel_name = url.split('user/')[1].split('/')[0]
-                        elif 'c/' in url:
-                            channel_name = url.split('c/')[1].split('/')[0]
-
-                        virtual_events.append({
-                            'type': 'youtube',
-                            'url': url,
-                            'title': f'YouTube: {channel_name}',
-                            'description': description
-                        })
-
-                    # Known specific sites (prioritized before general categories)
-                    elif 'genbio.ai' in url:
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': 'GenBio AI Seminar Series',
-                            'description': description
-                        })
-                    elif 'snap.stanford.edu' in url:
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': 'Stanford AI-Bio Seminar',
-                            'description': description
-                        })
-                    elif 'statsupai.org' in url:
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': 'StatsUP-AI Health Data Science',
-                            'description': description
-                        })
-                    elif 'bpdmc.org' in url:
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': 'BPDMC Seminar Series',
-                            'description': description
-                        })
-                    elif 'ai.ucsf.edu' in url:
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': 'UCSF AI Seminar Series',
-                            'description': description
-                        })
-
-                    # Seminar series (general)
-                    elif any(keyword in domain for keyword in ['seminar', 'talk', 'lecture', 'workshop']):
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': f'Seminar Series - {domain}',
-                            'description': description
-                        })
-
-                    # Seminar hubs (general)
-                    elif any(keyword in domain for keyword in ['conference', 'symposium', 'meeting', 'congress']):
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': f'Virtual Seminar Hub - {domain}',
-                            'description': description
-                        })
-
-                    # Research institutions (general)
-                    elif any(keyword in domain for keyword in ['edu', 'university', 'institute', 'lab', 'research']):
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': f'Research Event - {domain}',
-                            'description': description
-                        })
-
-                    # Default for unknown sites
-                    else:
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': f'Virtual Seminar - {domain}',
-                            'description': description
-                        })
-            except FileNotFoundError:
-                virtual_events = []
-        else:
-            # Cache is still valid, use cached data
-            virtual_events = []
-            try:
-                with open('virtual_worldwide.txt', 'r') as f:
-                    urls = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-
-                for url in urls:
-                    # Extract domain for better categorization
-                    from urllib.parse import urlparse
-                    try:
-                        parsed_url = urlparse(url)
-                        domain = parsed_url.netloc.lower()
-                        path = parsed_url.path.lower()
-                    except:
-                        domain = ''
-                        path = ''
-
-                    # Get description from cache
-                    description = _virtual_events_cache.get(url, 'AI + Biology related content')
-
-                    # YouTube channels
-                    if 'youtube.com' in url or 'youtu.be' in url:
-                        # Extract channel name from YouTube URL
-                        channel_name = 'AI + Biology YouTube Channel'
-                        if '@' in url:
-                            channel_name = url.split('@')[1].split('/')[0]
-                        elif 'channel/' in url:
-                            # For channel IDs, we'll use a more descriptive name
-                            channel_id = url.split('channel/')[1].split('/')[0]
-                            # Try to get a more meaningful name based on the channel ID
-                            if channel_id == 'UCiiOj5GSES6uw21kfXnxj3A':
-                                channel_name = 'Online Causal Inference Seminar'
-                            else:
-                                channel_name = f'AI + Biology Channel ({channel_id[:8]}...)'
-                        elif 'user/' in url:
-                            channel_name = url.split('user/')[1].split('/')[0]
-                        elif 'c/' in url:
-                            channel_name = url.split('c/')[1].split('/')[0]
-
-                        virtual_events.append({
-                            'type': 'youtube',
-                            'url': url,
-                            'title': f'YouTube: {channel_name}',
-                            'description': description
-                        })
-
-                    # Known specific sites (prioritized before general categories)
-                    elif 'genbio.ai' in url:
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': 'GenBio AI Seminar Series',
-                            'description': description
-                        })
-                    elif 'snap.stanford.edu' in url:
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': 'Stanford AI-Bio Seminar',
-                            'description': description
-                        })
-                    elif 'statsupai.org' in url:
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': 'StatsUP-AI Health Data Science',
-                            'description': description
-                        })
-                    elif 'bpdmc.org' in url:
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': 'BPDMC Seminar Series',
-                            'description': description
-                        })
-                    elif 'ai.ucsf.edu' in url:
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': 'UCSF AI Seminar Series',
-                            'description': description
-                        })
-
-                    # Seminar series (general)
-                    elif any(keyword in domain for keyword in ['seminar', 'talk', 'lecture', 'workshop']):
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': f'Seminar Series - {domain}',
-                            'description': description
-                        })
-
-                    # Seminar hubs (general)
-                    elif any(keyword in domain for keyword in ['conference', 'symposium', 'meeting', 'congress']):
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': f'Virtual Seminar Hub - {domain}',
-                            'description': description
-                        })
-
-                    # Research institutions (general)
-                    elif any(keyword in domain for keyword in ['edu', 'university', 'institute', 'lab', 'research']):
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': f'Research Event - {domain}',
-                            'description': description
-                        })
-
-                    # Default for unknown sites
-                    else:
-                        virtual_events.append({
-                            'type': 'seminar',
-                            'url': url,
-                            'title': f'Virtual Seminar - {domain}',
-                            'description': description
-                        })
-            except FileNotFoundError:
-                virtual_events = []
-
         return jsonify({
             'success': True,
-            'events': virtual_events
+            'events': _load_virtual_events()
         })
     except Exception as e:
         return jsonify({
