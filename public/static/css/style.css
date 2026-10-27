@@ -1,7 +1,9 @@
 /* Custom styles for AI + Biology Events (Seminars, Workshops, etc.) in the Greater Boston Area */
 
 body {
-    background-color: #f8f9fa;
+    background-color: #f4f7f7;
+    color: #23323a;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
@@ -25,8 +27,8 @@ header h1 {
 
 /* Custom minimal navbar */
 .custom-navbar {
-    background-color: #0d6efd;
-    padding: 0.25rem 1rem;
+    background-color: #173b46;
+    padding: 0.7rem clamp(1rem, 3vw, 2rem);
     margin: 0;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
@@ -43,7 +45,7 @@ header h1 {
 .nav-brand {
     color: white;
     text-decoration: none;
-    font-size: 0.9rem;
+    font-size: 1rem;
     font-weight: 600;
     padding: 0.25rem 0;
     margin: 0;
@@ -80,7 +82,7 @@ header h1 {
 
 .nav-link.active {
     color: white;
-    background-color: rgba(255, 255, 255, 0.2);
+    background-color: rgba(255, 255, 255, 0.16);
 }
 
 .nav-buttons {
@@ -111,15 +113,15 @@ header h1 {
 
 /* Card styles */
 .card {
-    border: none;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    border-radius: 8px;
+    border: 1px solid #dce6e6;
+    box-shadow: 0 3px 16px rgba(23,59,70,0.05);
+    border-radius: 12px;
 }
 
 .card-header {
     background-color: #fff;
-    border-bottom: 1px solid #e9ecef;
-    border-radius: 8px 8px 0 0 !important;
+    border-bottom: 1px solid #e5ecec;
+    border-radius: 12px 12px 0 0 !important;
 }
 
 .card-title {
@@ -136,7 +138,7 @@ header h1 {
 }
 
 .list-group-item:hover {
-    background-color: #f8f9fa;
+    background-color: #f0f7f6;
     cursor: pointer;
 }
 
@@ -545,8 +547,8 @@ header h1 {
 /* Time-grid styles (used for week/day views) */
 .time-grid {
     display: grid;
-    grid-template-columns: 60px 1fr;
-    height: 600px;
+    grid-template-columns: 52px 1fr;
+    height: 480px;
     border-top: 1px solid #dee2e6;
 }
 
@@ -713,13 +715,37 @@ header h1 {
 
 /* Highlighted event in list */
 .event-item.highlighted-event {
-    background: #e3f2fd !important;
-    border-left: 4px solid #2196f3 !important;
-    transform: translateX(5px);
-    transition: all 0.3s ease;
+    background: #eaf4f1 !important;
+    border-left: 4px solid #177e78 !important;
+    transition: background-color 0.2s ease;
 }
 
 .event-item.highlighted-event .event-title {
-    color: #1976d2;
+    color: #125e5a;
     font-weight: 600;
-} 
+}
+
+/* Keep the event list usable without turning the whole page into a giant feed. */
+#eventsList { max-height: calc(100vh - 345px); min-height: 180px; overflow-y: auto; }
+@media (max-width: 768px) { #eventsList { max-height: 55vh; } }
+
+/* Calm focus and navigation across the calendars. */
+.form-control:focus, .form-check-input:focus, .btn:focus-visible, .nav-link:focus-visible {
+    border-color: #177e78;
+    box-shadow: 0 0 0 3px rgba(23,126,120,0.2);
+    outline: none;
+}
+.form-check-input:checked { background-color: #177e78; border-color: #177e78; }
+.btn-primary { background-color: #177e78; border-color: #177e78; }
+.btn-primary:hover { background-color: #125e5a; border-color: #125e5a; }
+.nav-buttons .btn:disabled { opacity: .75; cursor: default; }
+
+@media (max-width: 900px) {
+    .nav-container { flex-wrap: wrap; gap: .65rem; }
+    .nav-links { order: 3; width: 100%; gap: .2rem; flex-wrap: wrap; }
+    .nav-link { padding: .4rem .55rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .event-item { animation: none; }
+    .calendar-event:hover { transform: none; }
+}

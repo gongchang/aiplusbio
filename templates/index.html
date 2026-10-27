@@ -32,7 +32,7 @@
                     </a>
                 </div>
                 <div class="nav-buttons">
-                    <button id="refreshBtn" class="btn btn-light btn-sm">
+                    <button id="refreshBtn" class="btn btn-light btn-sm" {% if serverless %}disabled title="Events refresh daily"{% endif %}>
                         <i class="fas fa-sync-alt me-1"></i> Refresh Events
                     </button>
                     <button id="statsBtn" class="btn btn-outline-light btn-sm">
@@ -45,7 +45,7 @@
         <!-- Main Content -->
         <div class="row flex-grow-1">
             <!-- Left Panel - Events List -->
-            <div class="col-md-6 col-lg-5">
+            <div class="col-md-6">
                 <div class="h-100 d-flex flex-column">
                     <!-- Filters -->
                     <div class="card mb-3">
@@ -119,7 +119,7 @@
             </div>
 
             <!-- Right Panel - Calendar -->
-            <div class="col-md-6 col-lg-7">
+            <div class="col-md-6">
                 <div class="card h-100">
                     <div class="card-body">
                         <div class="card">
@@ -132,7 +132,7 @@
                                         <button class="btn btn-outline-secondary calendar-view-btn" data-view="month">
                                             <i class="fas fa-calendar-alt"></i> Month
                                         </button>
-                                        <button class="btn btn-outline-secondary calendar-view-btn" data-view="week">
+                                        <button class="btn btn-primary calendar-view-btn" data-view="week">
                                             <i class="fas fa-calendar-week"></i> Week
                                         </button>
                                         <button class="btn btn-outline-secondary calendar-view-btn" data-view="day">

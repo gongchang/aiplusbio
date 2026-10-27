@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import json
+import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional
 
@@ -21,6 +23,11 @@ class EventStore:
 
         project = os.getenv("GOOGLE_CLOUD_PROJECT")
         kwargs = {"project": project} if project else {}
+        if os.getenv("FIREBASE_SERVICE_ACCOUNT"):
+            from google.oauth2 import service_account
+            info = json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"])
+            kwargs["credentials"] = service_account.Credentials.from_service_account_info(info)
+            kwargs["project"] = info["project_id"]
         self._client = firestore.Client(**kwargs)
         self._collection = self._client.collection(collection_name)
 
@@ -36,8 +43,12 @@ class EventStore:
             payload = self._normalise_event(event)
             batch.set(self._collection.document(doc_id), payload)
             count += 1
+            if count % 400 == 0:
+                batch.commit()
+                batch = self._client.batch()
 
-        batch.commit()
+        if count % 400:
+            batch.commit()
         return count
 
     def prune_older_than(self, days: int) -> int:
@@ -55,16 +66,15 @@ class EventStore:
         query = self._collection.order_by("date")
         if upcoming_only:
             query = query.where("date", ">=", datetime.utcnow().date().isoformat())
-        return [doc.to_dict() for doc in query.limit(limit).stream()]
+        return [dict(doc.to_dict(), id=doc.id) for doc in query.limit(limit).stream()]
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
     @staticmethod
     def _document_id(event: Dict) -> str:
-        date = event.get("date", "none")
-        url = event.get("url") or event.get("source_url") or "missing"
-        return f"{date}_{abs(hash(url))}"
+        identity = json.dumps([event.get("date"), event.get("source_url"), event.get("title")], ensure_ascii=False)
+        return hashlib.sha256(identity.encode()).hexdigest()
 
     @staticmethod
     def _normalise_event(event: Dict) -> Dict:
@@ -80,5 +90,8 @@ class EventStore:
             "requires_registration": bool(event.get("requires_registration", False)),
             "categories": event.get("categories", []),
             "institution": event.get("institution", "Others"),
+            "host": event.get("host", ""),
+            "source": event.get("source", ""),
+            "cost_type": event.get("cost_type", "Unknown"),
             "updated_at": datetime.utcnow().isoformat(),
         }

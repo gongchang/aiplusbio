@@ -10,6 +10,7 @@ import threading
 from typing import List, Dict, Any
 from urllib.parse import urljoin, urlparse
 import logging
+import os
 
 class EventScraper:
     def __init__(self, database):
@@ -18,15 +19,12 @@ class EventScraper:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         })
-        # Handle SSL certificate issues
-        self.session.verify = False
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         
         # Setup logging
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
         self.detail_cache = {}
+        self.serverless = bool(os.getenv('VERCEL'))
         
         # Load websites to watch
         self.websites = self.load_websites()
@@ -71,7 +69,8 @@ class EventScraper:
                 self.db.log_scraping(website, 'success', len(events))
                 
                 # Be respectful with delays
-                time.sleep(2)
+                if not self.serverless:
+                    time.sleep(2)
                 
             except Exception as e:
                 self.logger.error(f"Error scraping {website}: {str(e)}")
@@ -79,7 +78,8 @@ class EventScraper:
         
         # After scraping, attempt to enrich metadata for existing events that still need details
         try:
-            self.refresh_event_metadata(days_ahead=180, include_past=False, lookback_days=90, max_events=100)
+            if not self.serverless:
+                self.refresh_event_metadata(days_ahead=180, include_past=False, lookback_days=90, max_events=100)
         except Exception as e:
             self.logger.debug(f"Metadata refresh skipped due to error: {e}")
         
@@ -90,7 +90,7 @@ class EventScraper:
         events = []
         
         try:
-            response = self.session.get(url, timeout=30)
+            response = self.session.get(url, timeout=12 if self.serverless else 30)
             response.raise_for_status()
             
             # Try different scraping strategies based on URL patterns
@@ -113,18 +113,18 @@ class EventScraper:
             events = processed_events
 
             # Add events to database
-            new_events = []
+            new_events = {}
             for event in events:
                 event_id = self.db.add_event(event)
                 if event_id:
                     event['id'] = event_id
-                    new_events.append(event)
-            
-            return new_events
+                    new_events[event_id] = event
+
+            return list(new_events.values())
             
         except Exception as e:
             self.logger.error(f"Error scraping {url}: {str(e)}")
-            return []
+            raise
     
     def scrape_calendar_page(self, html: str, source_url: str) -> List[Dict[str, Any]]:
         """Scrape calendar-style event pages with improved element detection"""
@@ -235,7 +235,11 @@ class EventScraper:
                     'description': entry.get('summary', ''),
                     'url': entry.get('link', ''),
                     'source_url': source_url,
-                    'date': self.extract_date_from_text(entry.get('published', '')),
+                    'date': self.extract_date_from_text(entry.get('published', '')) or (
+                        datetime(*entry.published_parsed[:3]).strftime('%Y-%m-%d')
+                        if entry.get('published_parsed') and datetime(*entry.published_parsed[:3]).date() >= datetime.now().date()
+                        else ''
+                    ),
                     'time': self.extract_time_from_text(entry.get('published', '')),
                     'location': '',
                     'is_virtual': self.detect_virtual_event(entry.get('title', '') + ' ' + entry.get('summary', '')),
@@ -1261,7 +1265,8 @@ class EventScraper:
         # Work on a shallow copy to avoid mutating the original reference
         processed = dict(event)
         try:
-            processed = self.enrich_event_details(processed)
+            if not self.serverless:
+                processed = self.enrich_event_details(processed)
             processed = self.normalize_event_fields(processed)
         except Exception as e:
             self.logger.debug(f"Post-processing error for {processed.get('url', processed.get('source_url', 'unknown'))}: {e}")

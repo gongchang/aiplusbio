@@ -14,7 +14,7 @@ class EventsApp {
         };
         this.eventsById = new Map();
         this.eventsByDate = new Map();
-        this.calendarView = 'month';
+        this.calendarView = 'week';
         this.currentDate = new Date();
         this.searchDebounceTimer = null;
         
@@ -506,7 +506,7 @@ class EventsApp {
         
         // Initialize calendar if not already done
         if (!this.calendarView || !this.currentDate) {
-            this.calendarView = 'month';
+            this.calendarView = 'week';
             this.currentDate = new Date();
         }
 

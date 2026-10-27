@@ -1,0 +1,9 @@
+events.db
+*.db
+.env
+cloudenv/
+__pycache__/
+.pytest_cache/
+*.md
+Dockerfile
+get-docker.sh

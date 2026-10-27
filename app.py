@@ -1,6 +1,10 @@
 from flask import Flask, render_template, jsonify, request, Response
 from flask_cors import CORS
 import os
+import hmac
+import tempfile
+from pathlib import Path
+from datetime import timezone
 from datetime import datetime, timedelta
 import json
 import time
@@ -8,35 +12,31 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from urllib.parse import urlparse
 from event_scraper import EventScraper
+from event_dedupe import unique_events
+from computing_scraper import scrape_free_events, ALLOWED_SOURCES
 from event_categorizer import EventCategorizer
 from database import Database
-from computing_event_searcher import ComputingEventSearcher
-from enhanced_computing_event_searcher import EnhancedComputingEventSearcher
-from improved_tavily_searcher import ImprovedTavilySearcher
-from free_api_computing_searcher import FreeAPIComputingSearcher
-from enhanced_tech_computing_searcher import EnhancedTechComputingSearcher
-from simple_tech_event_searcher import SimpleTechEventSearcher
 
-USE_FIRESTORE = os.getenv('USE_FIRESTORE', 'false').lower() == 'true'
+SERVERLESS = bool(os.getenv('VERCEL'))
+if SERVERLESS:
+    os.environ['DATABASE_PATH'] = '/tmp/aiplusbio-web.db'
+USE_FIRESTORE = SERVERLESS or os.getenv('USE_FIRESTORE', 'false').lower() == 'true'
 if USE_FIRESTORE:
     from firestoreservice import EventStore
     event_store = EventStore()
+    computing_store = EventStore('computing_events')
 else:
     event_store = None
+    computing_store = None
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='public/static')
 CORS(app)
+app.jinja_env.globals['serverless'] = SERVERLESS
 
 # Initialize components
 db = Database()
 scraper = EventScraper(db)
 categorizer = EventCategorizer()
-computing_searcher = ComputingEventSearcher()
-enhanced_computing_searcher = EnhancedComputingEventSearcher()
-improved_tavily_searcher = ImprovedTavilySearcher()
-free_api_searcher = FreeAPIComputingSearcher()
-enhanced_tech_searcher = EnhancedTechComputingSearcher()
-simple_tech_searcher = SimpleTechEventSearcher()
 
 DEFAULT_DESCRIPTION = 'AI + Biology related content'
 PRIMARY_INSTITUTIONS = ('MIT', 'Harvard', 'BU', 'Brown')
@@ -388,7 +388,8 @@ def get_events():
                 institutions=selected_institutions,
                 include_other_institutions=include_other_institutions
             )
-        
+        filtered_events = unique_events(filtered_events)
+
         return jsonify({
             'success': True,
             'events': filtered_events,
@@ -402,7 +403,9 @@ def get_events():
 
 @app.route('/api/scrape', methods=['POST'])
 def trigger_scrape():
-    """API endpoint to manually trigger event scraping"""
+    """Local-only manual scraper; production runs through authenticated cron."""
+    if SERVERLESS:
+        return jsonify({'success': False, 'error': 'Use the daily scheduled refresh.'}), 403
     try:
         # Run scraper
         new_events = scraper.scrape_all_sites()
@@ -427,26 +430,65 @@ def trigger_scrape():
             'error': str(e)
         }), 500
 
+@app.route('/api/cron/scrape')
+def scheduled_scrape():
+    secret = os.getenv('CRON_SECRET')
+    if not secret:
+        return jsonify({'error': 'CRON_SECRET is not configured'}), 503
+    if not hmac.compare_digest(request.headers.get('Authorization', ''), f'Bearer {secret}'):
+        return jsonify({'error': 'Unauthorized'}), 401
+    if not USE_FIRESTORE:
+        return jsonify({'error': 'Firestore is required for scheduled scraping'}), 503
+
+    # ponytail: five sites/day keeps the invocation bounded; increase only after measuring duration.
+    with tempfile.TemporaryDirectory() as directory:
+        scrape_db = Database(str(Path(directory) / 'events.db'))
+        worker = EventScraper(scrape_db)
+        worker.serverless = True
+        sites = worker.websites
+        offset = (datetime.now(timezone.utc).date().toordinal() * 5) % len(sites) if sites else 0
+        selected = (sites + sites)[offset:offset + min(5, len(sites))]
+        count, errors = 0, []
+        for site in selected:
+            try:
+                events = worker.scrape_website(site)
+                for event in events:
+                    event['categories'] = categorizer.categorize_event(event)
+                count += event_store.upsert_events(_prepare_events_for_firestore(events))
+            except Exception as exc:
+                app.logger.exception('Failed scraping %s', site)
+                errors.append({'site': site, 'error': str(exc)})
+    try:
+        computing_count = _refresh_computing_events()
+    except Exception as exc:
+        app.logger.exception('Failed refreshing computing events')
+        computing_count = 0
+        errors.append({'site': 'computing', 'error': str(exc)})
+    return jsonify({'sites': len(selected), 'events': count, 'computing_events': computing_count, 'errors': errors}), 502 if errors else 200
+
+
+def _refresh_computing_events():
+    events = scrape_free_events()
+    if USE_FIRESTORE:
+        return computing_store.upsert_events(events)
+    for event in events:
+        db.add_computing_event(event)
+    return len(events)
+
+
 @app.route('/api/computing-events')
 def get_computing_events():
     """API endpoint to get all computing events with optional filtering"""
     try:
         search_query = request.args.get('search', '').strip().lower()
-        cost_types = []
-        if _bool_query_arg('free'):
-            cost_types.append('Free')
-        if _bool_query_arg('paid'):
-            cost_types.append('Paid')
-        if _bool_query_arg('unknown'):
-            cost_types.append('Unknown')
-        
         hosts_param = request.args.get('hosts', '')
         selected_hosts = [host for host in hosts_param.split(',') if host] if hosts_param else None
-        filtered_events = db.get_computing_events(
-            search_query=search_query or None,
-            cost_types=cost_types,
-            hosts=selected_hosts
-        )
+        events = (computing_store.list_events(limit=500) if USE_FIRESTORE else
+                  db.get_computing_events(cost_types=['Free']))
+        filtered_events = [e for e in events if e.get('cost_type') == 'Free' and e.get('source') in ALLOWED_SOURCES
+                           and (not search_query or search_query in
+                                f"{e.get('title', '')} {e.get('description', '')} {e.get('location', '')}".lower())
+                           and (not selected_hosts or e.get('host') in selected_hosts)]
         
         return jsonify({
             'success': True,
@@ -462,17 +504,15 @@ def get_computing_events():
 @app.route('/api/computing-events/search', methods=['POST'])
 def search_computing_events():
     """API endpoint to manually trigger computing event search"""
+    if SERVERLESS:
+        return jsonify({'success': False, 'error': 'Events refresh daily; manual refresh is local only.'}), 403
     try:
-        # Use enhanced tech searcher which includes Customized source and API integrations
-        events = enhanced_tech_searcher.search_events(max_results=100)
-        
-        # Save events to database
-        saved_count = enhanced_tech_searcher.save_events_to_database(events)
+        saved_count = _refresh_computing_events()
         
         return jsonify({
             'success': True,
-            'message': f'Successfully searched for tech-focused computing events (Boston + Virtual)',
-            'events_found': len(events),
+            'message': 'Refreshed verified free computing events',
+            'events_found': saved_count,
             'events_saved': saved_count
         })
     except Exception as e:
@@ -485,7 +525,15 @@ def search_computing_events():
 def get_computing_event_stats():
     """API endpoint to get computing event statistics"""
     try:
-        stats = db.get_computing_event_stats()
+        events = (computing_store.list_events(limit=500) if USE_FIRESTORE else db.get_computing_events(cost_types=['Free']))
+        events = [e for e in events if e.get('cost_type') == 'Free' and e.get('source') in ALLOWED_SOURCES]
+        today = datetime.now(timezone.utc).date().isoformat()
+        week = (datetime.now(timezone.utc).date() + timedelta(days=7)).isoformat()
+        stats = {'total_events': len(events), 'today_events': sum(e['date'] == today for e in events),
+                 'week_events': sum(today <= e['date'] <= week for e in events),
+                 'cost_type_stats': {'Free': len(events)},
+                 'host_stats': {h: sum(e.get('host') == h for e in events) for h in {e.get('host') for e in events}},
+                 'source_stats': {s: sum(e.get('source') == s for e in events) for s in {e.get('source') for e in events}}}
         return jsonify({
             'success': True,
             'stats': stats
@@ -500,7 +548,17 @@ def get_computing_event_stats():
 def get_stats():
     """API endpoint to get scraping statistics"""
     try:
-        stats = db.get_stats()
+        if USE_FIRESTORE:
+            events = event_store.list_events(limit=500)
+            today = datetime.utcnow().date()
+            stats = {
+                'total_events': len(events),
+                'today_events': sum(e.get('date') == today.isoformat() for e in events),
+                'week_events': sum(today.isoformat() <= e.get('date', '') <= (today + timedelta(days=7)).isoformat() for e in events),
+                'recent_scrapes': [],
+            }
+        else:
+            stats = db.get_stats()
         return jsonify({
             'success': True,
             'stats': stats
@@ -809,7 +867,7 @@ def get_social_media():
 def generate_ical():
     """Generate iCal feed for all events"""
     try:
-        events = db.get_events()
+        events = unique_events(event_store.list_events(limit=500) if USE_FIRESTORE else db.get_events())
         
         # Generate iCal content
         ical_content = generate_ical_content(events)
@@ -828,7 +886,7 @@ def generate_ical():
 def generate_filtered_ical(filter_type):
     """Generate iCal feed for filtered events"""
     try:
-        events = db.get_events()
+        events = unique_events(event_store.list_events(limit=500) if USE_FIRESTORE else db.get_events())
         filtered_events = []
         
         if filter_type == 'cs':
@@ -938,7 +996,8 @@ if __name__ == '__main__':
     db.init_db()
     
     # Start background scraper (currently enabled - runs every 6 hours)
-    scraper.start_background_scraping()
+    if not SERVERLESS:
+        scraper.start_background_scraping()
     
     # Get port from environment variable (required for Cloud Run)
     port = int(os.environ.get('PORT', 5002))

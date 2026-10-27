@@ -10,9 +10,7 @@
     <style>
         /* Calendar Styles */
         .calendar-container {
-            min-height: 1800px;
-            max-height: 2000px;
-            height: 100%;
+            min-height: 0;
         }
         
         .calendar-grid {
@@ -23,9 +21,8 @@
             border: 1px solid #dee2e6;
             border-radius: 0.375rem;
             overflow: hidden;
-            min-height: 1600px;
-            max-height: 1800px;
-            height: 100%;
+            min-height: 0;
+            height: auto;
         }
         
         .calendar-weekdays {
@@ -51,13 +48,12 @@
             grid-template-rows: repeat(6, 1fr);
             gap: 1px;
             flex: 1;
-            min-height: 1400px;
-            max-height: 1520px;
+            min-height: 0;
         }
         
         .calendar-day {
-            min-height: 220px;
-            padding: 1rem;
+            min-height: 110px;
+            padding: 0.5rem;
             background-color: white;
             border: 1px solid #dee2e6;
             cursor: pointer;
@@ -183,16 +179,16 @@
         
         /* Day View Styles */
         .day-view {
-            padding: 2rem;
-            min-height: 1600px;
-            max-height: 1800px;
+            padding: 1rem;
+            min-height: 0;
+            max-height: 500px;
             overflow-y: auto;
         }
         
         .day-header {
             text-align: center;
-            padding: 2rem;
-            margin-bottom: 2rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
             border-radius: 0.375rem;
             background-color: #f8f9fa;
             font-size: 1.5rem;
@@ -253,7 +249,7 @@
                     </a>
                 </div>
                 <div class="nav-buttons">
-                    <button id="searchBtn" class="btn btn-light btn-sm">
+                    <button id="searchBtn" class="btn btn-light btn-sm" {% if serverless %}disabled title="Events refresh daily"{% endif %}>
                         <i class="fas fa-search me-1"></i> Search Events
                     </button>
                     <button id="statsBtn" class="btn btn-outline-light btn-sm">
@@ -266,7 +262,7 @@
         <!-- Main Content -->
         <div class="row flex-grow-1">
             <!-- Left Panel - Events List -->
-            <div class="col-md-5 col-lg-4">
+            <div class="col-md-6">
                 <div class="h-100 d-flex flex-column">
                     <!-- Filters -->
                     <div class="card mb-3">
@@ -282,64 +278,7 @@
                                        placeholder="Search by title, description, or location...">
                             </div>
                             
-                            <!-- Cost Type Filters -->
-                            <div class="mb-3">
-                                <label class="form-label">Cost Type</label>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="freeFilter" checked>
-                                    <label class="form-check-label" for="freeFilter">
-                                        <i class="fas fa-gift me-1"></i> Free
-                                    </label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="paidFilter" checked>
-                                    <label class="form-check-label" for="paidFilter">
-                                        <i class="fas fa-dollar-sign me-1"></i> Paid
-                                    </label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="unknownFilter" checked>
-                                    <label class="form-check-label" for="unknownFilter">
-                                        <i class="fas fa-question me-1"></i> Unknown
-                                    </label>
-                                </div>
-                            </div>
-                            
-                            <!-- Source Filters -->
-                            <div class="mb-3">
-                                <label class="form-label">Source</label>
-                                <div class="form-check">
-                                    <input class="form-check-input source-checkbox" type="checkbox" id="sourceTavily" value="Tavily" checked>
-                                    <label class="form-check-label" for="sourceTavily">
-                                        <i class="fas fa-search me-1"></i> Tavily
-                                    </label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input source-checkbox" type="checkbox" id="sourceMeetup" value="Meetup RSS" checked>
-                                    <label class="form-check-label" for="sourceMeetup">
-                                        <i class="fas fa-users me-1"></i> Meetup RSS
-                                    </label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input source-checkbox" type="checkbox" id="sourceEventbrite" value="Eventbrite" checked>
-                                    <label class="form-check-label" for="sourceEventbrite">
-                                        <i class="fas fa-ticket-alt me-1"></i> Eventbrite
-                                    </label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input source-checkbox" type="checkbox" id="sourceTechRSS" value="Tech RSS Feed" checked>
-                                    <label class="form-check-label" for="sourceTechRSS">
-                                        <i class="fas fa-rss me-1"></i> Tech RSS Feed
-                                    </label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input source-checkbox" type="checkbox" id="sourceCustomized" value="Customized" checked>
-                                    <label class="form-check-label" for="sourceCustomized">
-                                        <i class="fas fa-building me-1"></i> Customized
-                                    </label>
-                                </div>
-                            </div>
-                            
+                            <p class="small text-muted">Free industry/community events: Boston-area in person or virtual anywhere.</p>
                             <!-- Host Filters -->
                             <div class="mb-3">
                                 <label class="form-label">Hosts</label>
@@ -372,7 +311,7 @@
             </div>
 
             <!-- Right Panel - Calendar -->
-            <div class="col-md-7 col-lg-8">
+            <div class="col-md-6">
                 <div class="card h-100 d-flex flex-column">
                     <div class="card-body p-2 flex-grow-1 d-flex flex-column">
                         <div class="card flex-grow-1 border-0 d-flex flex-column">
@@ -467,14 +406,7 @@
                 <div class="modal-body">
                     <div class="alert alert-info">
                         <i class="fas fa-info-circle me-2"></i>
-                        This will search for new computing events in the Boston area using Tavily API.
-                        The search looks for events that are:
-                        <ul class="mb-0 mt-2">
-                            <li>Computing-related (AI, ML, cloud computing, etc.)</li>
-                            <li>Formal events (workshops, conferences, meetups, etc.)</li>
-                            <li>Local to the Greater Boston area</li>
-                            <li>Not overlapping with existing tracked websites</li>
-                        </ul>
+                        Refresh verified free events from Google Developer Groups, GitHub, and AWS: Boston-area in person or virtual anywhere. Paid and unknown-price admission is excluded.
                     </div>
                     <div id="searchProgress" class="d-none">
                         <div class="progress">
@@ -511,7 +443,7 @@
         
         // Calendar navigation variables
         let currentDate = new Date();
-        let currentView = 'month';
+        let currentView = 'week';
 
         // Load events when page loads
         document.addEventListener('DOMContentLoaded', function() {
@@ -522,22 +454,12 @@
             setupEventListeners();
             
             // Set default active view button
-            document.querySelector('.calendar-view-btn[data-view="month"]').classList.add('active');
+            document.querySelector('.calendar-view-btn[data-view="week"]').classList.add('active');
         });
 
         function setupEventListeners() {
             // Search input
             document.getElementById('searchInput').addEventListener('input', filterEvents);
-            
-            // Cost type filters
-            document.getElementById('freeFilter').addEventListener('change', filterEvents);
-            document.getElementById('paidFilter').addEventListener('change', filterEvents);
-            document.getElementById('unknownFilter').addEventListener('change', filterEvents);
-            
-            // Source filters
-            document.querySelectorAll('.source-checkbox').forEach(checkbox => {
-                checkbox.addEventListener('change', filterEvents);
-            });
             
             // Search button
             document.getElementById('searchBtn').addEventListener('click', showSearchModal);
@@ -648,20 +570,6 @@
 
         function filterEvents() {
             const searchQuery = document.getElementById('searchInput').value.toLowerCase();
-            const freeFilter = document.getElementById('freeFilter').checked;
-            const paidFilter = document.getElementById('paidFilter').checked;
-            const unknownFilter = document.getElementById('unknownFilter').checked;
-            
-            // Get selected sources
-            const selectedSources = new Set();
-            document.querySelectorAll('.source-checkbox:checked').forEach(checkbox => {
-                selectedSources.add(checkbox.value);
-            });
-            
-            // If no sources selected, show all events (don't filter by source)
-            // This prevents issues on initial load
-            const filterBySource = selectedSources.size > 0;
-            
             // Get selected hosts
             const selectedHosts = new Set();
             document.querySelectorAll('.host-checkbox:checked').forEach(checkbox => {
@@ -673,21 +581,6 @@
                 if (searchQuery) {
                     const searchableText = `${event.title} ${event.description} ${event.location}`.toLowerCase();
                     if (!searchableText.includes(searchQuery)) {
-                        return false;
-                    }
-                }
-                
-                // Cost type filter
-                const costType = event.cost_type || 'Unknown';
-                if (costType === 'Free' && !freeFilter) return false;
-                if (costType === 'Paid' && !paidFilter) return false;
-                if (costType === 'Unknown' && !unknownFilter) return false;
-                
-                // Source filter
-                if (filterBySource) {
-                    const eventSource = event.source || 'Unknown';
-                    // Check if event source matches any selected source
-                    if (!selectedSources.has(eventSource)) {
                         return false;
                     }
                 }
@@ -1058,14 +951,6 @@
                     <div class="legend-item">
                         <div class="legend-color" style="background-color: #28a745;"></div>
                         <span>Free Events</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-color" style="background-color: #ffc107;"></div>
-                        <span>Paid Events</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-color" style="background-color: #6c757d;"></div>
-                        <span>Unknown Cost</span>
                     </div>
                 </div>
             `;

@@ -2,6 +2,19 @@
 
 A comprehensive web application that automatically scrapes and aggregates academic events from multiple MIT and Harvard websites, categorizes them using AI, and presents them in a modern web interface with Google Calendar integration.
 
+## Vercel Hobby deployment
+
+1. Create a Google Cloud Firestore database (Native mode) and a service account with Firestore read/write access. Put the **entire service-account JSON** in a Vercel environment variable named `FIREBASE_SERVICE_ACCOUNT` (server-side only; never commit it). Firestore has its own billing/quotas; set a budget and monitor reads/writes.
+2. Set `CRON_SECRET` to a long random value in Vercel project environment variables. Deploy the repo root with the **Other** framework preset (no custom build command), e.g. `vercel --prod`. `app.py` is the Flask entrypoint, `requirements.txt` contains production dependencies, and `public/static` is served by the CDN. No `USE_FIRESTORE` toggle is needed on Vercel.
+3. Once deployed, seed data manually using `curl -H "Authorization: Bearer $CRON_SECRET" https://YOUR-DOMAIN/api/cron/scrape`; rerun on subsequent days to cover the full list. The production cron in `vercel.json` runs at most once daily (08:00–08:59 UTC on Hobby). It rotates through five of the 15 sources per day, so a full pass takes three days. Inspect the JSON `computing_events` count and `errors` plus Vercel function logs for failures; retries with the same secret are safe.
+4. Smoke check `GET /api/events`, `/calendar.ics`, and `/static/js/app.js`. Locally: `pip install -r requirements-local.txt && python test_vercel.py && python app.py`. Local SQLite scraping is unchanged.
+
+The Vercel function runs for at most 300 seconds with Fluid Compute. Scrapes use a temporary SQLite file **only within the cron invocation**; Firestore is the durable event store. No background threads or SQLite writes from public requests; the public Refresh button is disabled. Detail-page enrichment is skipped on Vercel to bound execution; per-source HTTP calls time out after 12 seconds. Computing events now use the same daily cron and a separate Firestore collection (`computing_events`). Only verified free admission is stored: Boston-area in-person or online events anywhere. Sources: GDG Cloud Boston and GDG Grand Rapids (per-event free badges and dates), plus official GitHub Universe and AWS re:Invent pages (free **virtual access only**, not paid on-site tickets). These two annual pages are admitted only while their official page still shows the year, event date, and explicit free-virtual wording. Add other industry calendars when their price and date evidence is similarly reliable. Local manual computing refresh uses SQLite; public manual refresh is disabled on Vercel. Stats on Vercel reflect at most 500 upcoming events and do not include local scrape logs. Multiple daily cron runs or guaranteed timing require a different scheduler/plan.
+
+Vercel limits: [Hobby cron frequency/precision](https://vercel.com/docs/cron-jobs/usage-and-pricing), [function duration](https://vercel.com/docs/functions/configuring-functions/duration), [Flask deployment](https://vercel.com/docs/frameworks/backend/flask).
+
+The main calendar and ICS feeds now collapse matching dated/timed talks and exclude obvious navigation/page-title scrape artifacts. Source records are retained (no destructive deletion); if source dates/times disagree, review the upstream scraper rather than assuming the events are identical. The event list scrolls independently of the calendar, with a quieter responsive theme.
+
 ## Features
 
 ### 🎯 **Smart Event Aggregation**
